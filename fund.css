@@ -17,3 +17,5 @@ th:first-child,td:first-child,.l{text-align:left}
 th{font-size:11px;color:var(--mute);font-weight:500}
 tr.closed td{color:#999}tfoot td{font-weight:600}
 canvas{max-height:280px}
+.fc{display:none}
+body.expand .fc{display:table-cell}
