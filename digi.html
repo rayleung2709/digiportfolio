@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="zh-HK">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DigiPortfolio</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+:root{--g:#0a7d3b;--r:#c0392b;--bg:#f6f7f9;--card:#fff;--mute:#666}
+*{box-sizing:border-box}
+body{margin:0;font-family:-apple-system,system-ui,sans-serif;background:var(--bg);color:#222;font-size:14px}
+header{padding:16px;background:var(--card);border-bottom:1px solid #e3e3e3}
+h1{margin:0 0 4px;font-size:18px}.sub{color:var(--mute);font-size:12px}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;padding:12px 16px}
+.kpi{background:var(--card);border-radius:10px;padding:10px 12px}
+.kpi .l{font-size:11px;color:var(--mute)}.kpi .v{font-size:17px;font-weight:600;margin-top:2px}
+.pos{color:var(--g)}.neg{color:var(--r)}
+nav{display:flex;gap:6px;padding:0 16px}
+nav button{flex:1;padding:10px;border:0;border-radius:8px 8px 0 0;background:#e6e8ec;font-size:14px}
+nav button.on{background:var(--card);font-weight:600}
+section{display:none;background:var(--card);margin:0 16px 16px;padding:12px;border-radius:0 0 10px 10px}
+section.on{display:block}
+.wrap{overflow-x:auto}
+table{border-collapse:collapse;width:100%;white-space:nowrap}
+th,td{padding:6px 8px;text-align:right;border-bottom:1px solid #eee}
+th:first-child,td:first-child,.l{text-align:left}
+th{font-size:11px;color:var(--mute);font-weight:500;position:sticky;top:0;background:var(--card)}
+tr.closed td{color:#999}tfoot td{font-weight:600}
+canvas{max-height:300px;margin-bottom:12px}
+</style>
+</head>
+<body>
+<header><h1>DigiPortfolio</h1><div class="sub" id="upd">loading…</div></header>
+<div class="kpis" id="kpis"></div>
+<nav>
+  <button data-t="hold" class="on">持倉</button>
+  <button data-t="tx">交易</button>
+  <button data-t="hist">歷史</button>
+</nav>
+<section id="hold" class="on"><div class="wrap" id="holdT"></div></section>
+<section id="tx"><div class="wrap" id="txT"></div></section>
+<section id="hist"><canvas id="chart"></canvas><div class="wrap" id="histT"></div></section>
+
+<script>
+const $=s=>document.querySelector(s);
+const fmt=(n,d=2)=>n==null?'–':n.toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});
+const pct=n=>n==null||!isFinite(n)?'–':(n*100).toFixed(1)+'%';
+const cls=n=>n>0?'pos':n<0?'neg':'';
+const get=u=>fetch(u+'?t='+Date.now()).then(r=>r.ok?r.json():{});
+
+document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('nav button,section').forEach(e=>e.classList.remove('on'));
+  b.classList.add('on');$('#'+b.dataset.t).classList.add('on');
+});
+
+// 由交易紀錄 replay 出持倉（平均成本法），asOf = 截至某日
+function replay(txs,asOf){
+  const pos={};let cash=0,contributed=0,realised=0,div=0,fee=0;
+  for(const [d,code,type,units,price,amt] of txs){
+    if(asOf&&d>asOf)break;
+    if(code==='XXX:CASH'){
+      if(type==='In'){cash+=amt;contributed+=amt;}
+      else if(type==='Out'){cash-=amt;contributed-=amt;}
+      else if(type==='Dividend'){cash+=amt;div+=amt;}
+      else if(type==='Fee'){cash-=amt;fee+=amt;}
+      continue;
+    }
+    const p=pos[code]||(pos[code]={units:0,cost:0,realised:0});
+    if(type==='Buy'){p.units+=units;p.cost+=amt;cash-=amt;}
+    else if(type==='Sell'){
+      const cb=p.cost/p.units*units;          // 賣出部分嘅成本
+      p.realised+=amt-cb;realised+=amt-cb;
+      p.units-=units;p.cost-=cb;cash+=amt;
+      if(p.units<1e-6){p.units=0;p.cost=0;}
+    }
+  }
+  return {pos,cash,contributed,realised,div,fee};
+}
+
+// XIRR（Newton）：flows = [{d:'YYYY-MM-DD', v}]，入金為負、期末市值為正
+function xirr(flows){
+  if(flows.length<2)return null;
+  const t0=new Date(flows[0].d),yr=f=>(new Date(f.d)-t0)/31557600000;
+  let r=0.1;
+  for(let i=0;i<200;i++){
+    let f=0,df=0;
+    for(const c of flows){const t=yr(c),b=Math.pow(1+r,t);f+=c.v/b;df-=t*c.v/(b*(1+r));}
+    if(Math.abs(df)<1e-12)return null;
+    const nr=r-f/df;
+    if(!isFinite(nr)||nr<-0.99)return null;
+    if(Math.abs(nr-r)<1e-8)return nr;
+    r=nr;
+  }
+  return r;
+}
+const valueAt=(S,prices)=>Object.entries(S.pos).reduce((v,[c,p])=>v+(p.units>0?p.units*(prices[c]??0):0),S.cash);
+const extFlows=(txs,upTo)=>txs.filter(t=>(!upTo||t[0]<=upTo)&&t[1]==='XXX:CASH'&&(t[2]==='In'||t[2]==='Out'))
+  .map(t=>({d:t[0],v:t[2]==='In'?-t[5]:t[5]}));
+
+async function main(){
+  const [tx,px,hist]=await Promise.all([get('data/transactions.json'),get('data/prices.json'),get('data/history.json')]);
+  const key=t=>t[0]+(t[1]==='XXX:CASH'&&t[2]==='In'?'0':'1');
+  const txs=[...tx.transactions].sort((a,b)=>key(a)<key(b)?-1:key(a)>key(b)?1:0);
+  const names=tx.instruments,prices=px.prices||{};
+  const today=px.updated?px.updated.slice(0,10):new Date().toISOString().slice(0,10);
+
+  // ── 頂部 KPI ──
+  const S=replay(txs),value=valueAt(S,prices),pl=value-S.contributed;
+  const irr=xirr([...extFlows(txs),{d:today,v:value}]);
+  $('#upd').textContent='價格更新：'+(px.updated?new Date(px.updated).toLocaleString('zh-HK'):'（未有，去 Actions 跑一次）');
+  $('#kpis').innerHTML=[
+    ['總成本（淨入金）',fmt(S.contributed,0)],
+    ['總市值',fmt(value,0)],
+    ['總盈虧',`<span class="${cls(pl)}">${fmt(pl,0)} (${pct(pl/S.contributed)})</span>`],
+    ['年化 XIRR',`<span class="${cls(irr)}">${pct(irr)}</span>`],
+    ['已實現盈虧',`<span class="${cls(S.realised)}">${fmt(S.realised,0)}</span>`],
+    ['股息 / 費用',`${fmt(S.div,0)} / ${fmt(S.fee,0)}`],
+    ['現金',fmt(S.cash,0)],
+  ].map(([l,v])=>`<div class="kpi"><div class="l">${l}</div><div class="v">${v}</div></div>`).join('');
+
+  // ── Tab 1 持倉 ──
+  let rows='',tc=0,tv=0;
+  const codes=Object.keys(S.pos).sort((a,b)=>(S.pos[b].units>0)-(S.pos[a].units>0)||a.localeCompare(b));
+  for(const c of codes){
+    const p=S.pos[c],open=p.units>0,pr=prices[c],mv=open?p.units*(pr??0):0,u=mv-p.cost;
+    tc+=p.cost;tv+=mv;
+    rows+=`<tr class="${open?'':'closed'}"><td>${c.replace('LON:','')}</td><td class="l">${names[c]?.name||''}</td>
+      <td>${open?fmt(p.units,0):'–'}</td><td>${open?fmt(p.cost,0):'–'}</td><td>${open?fmt(p.cost/p.units):'–'}</td>
+      <td>${fmt(pr)}</td><td>${open?fmt(mv,0):'–'}</td>
+      <td class="${cls(u)}">${open?fmt(u,0):'–'}</td><td class="${cls(u)}">${open?pct(u/p.cost):'–'}</td>
+      <td class="${cls(p.realised)}">${p.realised?fmt(p.realised,0):'–'}</td></tr>`;
+  }
+  $('#holdT').innerHTML=`<table><thead><tr><th>代號</th><th class="l">名稱</th><th>股數</th><th>成本</th><th>平均價</th><th>現價</th><th>市值</th><th>未實現</th><th>%</th><th>已實現</th></tr></thead>
+    <tbody>${rows}</tbody><tfoot><tr><td colspan="3">合計（不含現金）</td><td>${fmt(tc,0)}</td><td></td><td></td><td>${fmt(tv,0)}</td>
+    <td class="${cls(tv-tc)}">${fmt(tv-tc,0)}</td><td class="${cls(tv-tc)}">${pct((tv-tc)/tc)}</td><td class="${cls(S.realised)}">${fmt(S.realised,0)}</td></tr></tfoot></table>`;
+
+  // ── Tab 2 交易（新→舊）──
+  $('#txT').innerHTML=`<table><thead><tr><th>日期</th><th class="l">代號</th><th class="l">類型</th><th>單位</th><th>價格</th><th>金額</th></tr></thead><tbody>${
+    [...txs].reverse().map(([d,c,t,u,p,a])=>`<tr><td>${d}</td><td class="l">${c.replace('LON:','')}</td><td class="l">${t}</td><td>${u?fmt(u,0):''}</td><td>${p?fmt(p):''}</td><td>${fmt(a)}</td></tr>`).join('')
+  }</tbody></table>`;
+
+  // ── Tab 3 歷史：每個交易日 replay 一次 ──
+  const H=[];let last={};
+  for(const d of Object.keys(hist).sort()){
+    if(d<txs[0][0])continue;
+    last={...last,...hist[d]};                       // 某隻當日冇價就沿用上日
+    const st=replay(txs,d),v=valueAt(st,last),pl=v-st.contributed;
+    const old=(new Date(d)-new Date(txs[0][0]))>25*86400000;   // 頭 25 日唔計年化（會癲）
+    H.push({d,cost:st.contributed,v,pl,irr:old?xirr([...extFlows(txs,d),{d,v}]):null});
+  }
+  $('#histT').innerHTML=`<table><thead><tr><th>日期</th><th>總成本</th><th>總市值</th><th>盈虧</th><th>%</th><th>XIRR</th></tr></thead><tbody>${
+    [...H].reverse().map(h=>`<tr><td>${h.d}</td><td>${fmt(h.cost,0)}</td><td>${fmt(h.v,0)}</td><td class="${cls(h.pl)}">${fmt(h.pl,0)}</td><td class="${cls(h.pl)}">${pct(h.pl/h.cost)}</td><td class="${cls(h.irr)}">${pct(h.irr)}</td></tr>`).join('')
+  }</tbody></table>`;
+  if(H.length)new Chart($('#chart'),{type:'line',data:{labels:H.map(h=>h.d),datasets:[
+    {label:'總市值',data:H.map(h=>h.v),borderColor:'#0a7d3b',pointRadius:0,tension:.2},
+    {label:'總成本',data:H.map(h=>h.cost),borderColor:'#999',borderDash:[4,4],pointRadius:0,stepped:true}]},
+    options:{animation:false,interaction:{mode:'index',intersect:false},
+      scales:{x:{ticks:{maxTicksLimit:8}},y:{ticks:{callback:v=>(v/1000)+'k'}}}}});
+}
+main().catch(e=>{$('#upd').textContent='錯誤：'+e.message;console.error(e);});
+</script>
+</body>
+</html>
