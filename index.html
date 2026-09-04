@@ -234,11 +234,17 @@ async function main(){
     $('#histT').innerHTML=`<table><thead><tr><th>日期</th><th>總成本</th><th>總市值</th><th>盈虧</th><th>%</th><th>XIRR</th></tr></thead><tbody>${
       [...H].reverse().map(h=>{const r=R(h.d);return `<tr><td>${h.d}</td><td>${M(h.cost,0,r)}</td><td>${M(h.v,0,r)}</td><td class="${cls(h.pl)}">${M(h.pl,0,r)}</td><td class="${cls(h.pl)}">${pct(h.pl/h.cost)}</td><td class="${cls(h.irr)}">${pct(h.irr)}</td></tr>`;}).join('')
     }</tbody></table>`;
-    const drawHist=rg=>{
+const drawHist=rg=>{
       histRange=rg;charts.hist?.destroy();const D=sliceR(H,rg);
+      const o=base();
+      o.scales.y1={position:'right',grid:{drawOnChartArea:false},ticks:{callback:v=>(v/1000).toFixed(0)+'k'},
+        title:{display:true,text:`盈虧 ${CUR}`,font:{size:10}}};
       charts.hist=new Chart($('#chart'),{type:'line',data:{labels:D.map(h=>h.d),datasets:[
-        {label:`總市值 ${CUR}`,data:D.map(h=>h.v*R(h.d)),borderColor:'#0a7d3b',pointRadius:0,tension:.2},
-        {label:`總成本 ${CUR}`,data:D.map(h=>h.cost*R(h.d)),borderColor:'#999',borderDash:[4,4],pointRadius:0,stepped:true}]},options:base()});
+        {label:`總市值 ${CUR}`,data:D.map(h=>h.v*R(h.d)),borderColor:'#0a7d3b',pointRadius:0,tension:.2,yAxisID:'y'},
+        {label:`總成本 ${CUR}`,data:D.map(h=>h.cost*R(h.d)),borderColor:'#999',borderDash:[4,4],pointRadius:0,stepped:true,yAxisID:'y'},
+        {label:`盈虧 ${CUR}`,data:D.map(h=>h.pl*R(h.d)),pointRadius:0,tension:.2,borderWidth:1.5,yAxisID:'y1',
+          segment:{borderColor:c=>c.p1.parsed.y>=0?'#0a7d3b':'#c0392b'},borderColor:'#0a7d3b',
+          fill:{target:'origin',above:'rgba(10,125,59,.10)',below:'rgba(192,57,43,.10)'}}]},options:o});
     };
     mkBar($('#histBar'),histRange,drawHist,()=>charts.hist?.resetZoom());
     if(H.length)drawHist(histRange);
@@ -277,11 +283,16 @@ async function main(){
       const q=st.pos[code],pr=p[code];if(!q||pr==null)continue;
       const mv=q.units*pr;rows.push({d,r:R(d),units:q.units,cost:q.cost,avg:q.units?q.cost/q.units:null,px:pr,mv,u:mv-q.cost,realised:q.realised});
     }
-    const o=base();o.scales.y1={position:'right',grid:{drawOnChartArea:false}};
-    charts.inst=new Chart($('#instChart'),{type:'line',data:{labels:rows.map(x=>x.d),datasets:[
-      {label:`市值 ${CUR}`,data:rows.map(x=>x.mv*x.r),borderColor:'#0a7d3b',pointRadius:0,tension:.2,yAxisID:'y'},
-      {label:`成本 ${CUR}`,data:rows.map(x=>x.cost*x.r),borderColor:'#999',borderDash:[4,4],pointRadius:0,stepped:true,yAxisID:'y'},
-      {label:`現價 ${CUR}`,data:rows.map(x=>x.px*x.r),borderColor:'#2c5fd1',pointRadius:0,tension:.2,borderWidth:1,yAxisID:'y1'}]},options:o});
+    const o=base();
+      o.scales.y1={position:'right',grid:{drawOnChartArea:false},ticks:{callback:v=>(v/1000).toFixed(0)+'k'},title:{display:true,text:`盈虧 ${CUR}`,font:{size:10}}};
+      o.scales.y2={position:'right',display:false};           // 現價：隱藏軸，只睇形狀
+      charts.inst=new Chart($('#instChart'),{type:'line',data:{labels:rows.map(x=>x.d),datasets:[
+        {label:`市值 ${CUR}`,data:rows.map(x=>x.mv*x.r),borderColor:'#0a7d3b',pointRadius:0,tension:.2,yAxisID:'y'},
+        {label:`成本 ${CUR}`,data:rows.map(x=>x.cost*x.r),borderColor:'#999',borderDash:[4,4],pointRadius:0,stepped:true,yAxisID:'y'},
+        {label:`未實現盈虧 ${CUR}`,data:rows.map(x=>x.u*x.r),pointRadius:0,tension:.2,borderWidth:1.5,yAxisID:'y1',
+          segment:{borderColor:c=>c.p1.parsed.y>=0?'#0a7d3b':'#c0392b'},borderColor:'#0a7d3b',
+          fill:{target:'origin',above:'rgba(10,125,59,.10)',below:'rgba(192,57,43,.10)'}},
+        {label:`現價 ${CUR}`,data:rows.map(x=>x.px*x.r),borderColor:'#2c5fd1',pointRadius:0,tension:.2,borderWidth:1,yAxisID:'y2',hidden:true}]},options:o});
     const p=S.pos[code],open=p.units>0,pr=prices[code],mv=open?p.units*(pr??0):0,u=mv-p.cost;
     const firstBuy=txs.find(t=>t[1]===code&&t[2]==='Buy'),iirr=xirr([...instFlows(txs,code),{d:today,v:mv}]);
     $('#instKpi').innerHTML=[
