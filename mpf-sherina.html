@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="zh-HK">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MPF · Ray</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<link rel="stylesheet" href="fund.css">
+</head>
+<body data-file="data/mpf-sherina.json">
+<header><h1 id="title">…</h1><div class="sub" id="upd">loading…</div>
+  <nav><a href="index.html">DigiPortfolio</a><a href="mpf-ray.html">MPF Ray</a><a href="mpf-sherina.html">MPF Sherina</a><a href="pf-sherina.html">PF Sherina</a></nav></header>
+<div class="kpis" id="kpis"></div>
+<section><canvas id="chart"></canvas></section>
+<section><h2>持倉</h2><div class="wrap" id="holdT"></div></section>
+<section><details open><summary>歷史</summary><div class="wrap" id="histT"></div></details></section>
+<section><details><summary>交易</summary><div class="wrap" id="txT"></div></details></section>
+<script src="fund.js"></script>
+</body>
+</html>
