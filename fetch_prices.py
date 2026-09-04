@@ -29,6 +29,13 @@ def main():
     fx = yf.Ticker("GBPUSD=X").history(start=start)["Close"]
     fx.index = fx.index.tz_localize(None).normalize()
 
+    # USD→HKD，畀前端 toggle 用；存入 history 當一隻「假股票」
+    hk = yf.Ticker("HKD=X").history(start=start)["Close"].dropna()
+    hk.index = hk.index.tz_localize(None).normalize()
+    for d, p in hk.items():
+        hist.setdefault(d.date().isoformat(), {})["FX:USDHKD"] = round(float(p), 4)
+    print(f"OK   FX:USDHKD         {hk.iloc[-1]:>9.4f} @ {hk.index[-1].date()}")       
+       
     for code, meta in TX["instruments"].items():
         sym = meta.get("yahoo")
         if not sym:
