@@ -1,10 +1,10 @@
 {
   "title": "MPF · Ray",
 "funds": {
-  "AM": "America（照結單改名）",
-  "AS": "Asia（照結單改名）",
-  "GL": "Global（照結單改名）",
-  "GR": "Growth（照結單改名）"
+  "AM": "America",
+  "AS": "Asia",
+  "GL": "Global",
+  "GR": "Growth"
 },
   "transactions": [
     ["2024-03-06", "AM", 10854.363, 11.03],
