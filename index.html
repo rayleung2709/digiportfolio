@@ -12,7 +12,11 @@
 *{box-sizing:border-box}
 body{margin:0;font-family:-apple-system,system-ui,sans-serif;background:var(--bg);color:#222;font-size:14px}
 header{padding:16px;background:var(--card);border-bottom:1px solid #e3e3e3}
-h1{margin:0 0 4px;font-size:18px}.sub{color:var(--mute);font-size:12px}
+.hrow{display:flex;align-items:center;gap:10px}
+h1{margin:0 0 4px;font-size:18px;flex:1}.sub{color:var(--mute);font-size:12px}
+.seg{display:inline-flex;border:1px solid #222;border-radius:20px;overflow:hidden}
+.seg button{padding:5px 14px;border:0;background:#fff;font-size:13px;font-weight:600;cursor:pointer}
+.seg button.on{background:#222;color:#fff}
 .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;padding:12px 16px}
 .kpi{background:var(--card);border-radius:10px;padding:10px 12px;border:1px solid #eee}
 .kpi .l{font-size:11px;color:var(--mute)}.kpi .v{font-size:17px;font-weight:600;margin-top:2px}
@@ -38,7 +42,11 @@ canvas{max-height:300px;margin-bottom:12px}
 </style>
 </head>
 <body>
-<header><h1>DigiPortfolio</h1><div class="sub" id="upd">loading…</div></header>
+<header>
+  <div class="hrow"><h1>DigiPortfolio</h1>
+    <div class="seg" id="curSeg"><button data-c="USD">USD</button><button data-c="HKD">HKD</button></div></div>
+  <div class="sub" id="upd">loading…</div>
+</header>
 <div class="kpis" id="kpis"></div>
 <nav>
   <button data-t="hold" class="on">持倉</button>
@@ -67,13 +75,21 @@ const cls=n=>n>0?'pos':n<0?'neg':'';
 const get=u=>fetch(u+'?t='+Date.now()).then(r=>r.ok?r.json():{});
 const charts={};
 
+// ── 貨幣 ──
+let CUR=localStorage.getItem('cur')||'USD';
+let FX=7.8;                                   // 最新 USD→HKD（由 prices.json 讀）
+let FXH=[];                                   // [[date,rate],...] 歷史匯率
+const fxAt=d=>{let r=FX;for(const [dd,v] of FXH){if(dd>d)break;r=v;}return r;};
+const R=d=>CUR==='HKD'?(d?fxAt(d):FX):1;      // 某日（或今日）換算率
+const M=(n,d=2,r=R())=>n==null?'–':fmt(n*r,d); // 金額格式（會換算）
+
 function showTab(id){
   document.querySelectorAll('nav button,section').forEach(e=>e.classList.toggle('on',e.dataset.t===id||e.id===id));
   setTimeout(()=>Object.values(charts).forEach(c=>c?.resize()),0);
 }
 document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>showTab(b.dataset.t));
 
-// ── Chart 共用設定（zoom / pan）──
+// ── Chart 共用設定 ──
 const ZOOM={zoom:{wheel:{enabled:true},pinch:{enabled:true},mode:'x'},pan:{enabled:true,mode:'x'},limits:{x:{minRange:5}}};
 const base=()=>({animation:false,interaction:{mode:'index',intersect:false},
   plugins:{zoom:JSON.parse(JSON.stringify(ZOOM)),legend:{position:'bottom'}},
@@ -85,17 +101,18 @@ function sliceR(rows,r){
   const from=r==='YTD'?end.getFullYear()+'-01-01':new Date(end-RANGES[r]*86400000).toISOString().slice(0,10);
   return rows.filter(x=>x.d>=from);
 }
-function mkBar(el,onRange,onReset){
+function mkBar(el,active,onRange,onReset){
+  el.querySelectorAll('button').forEach(b=>b.remove());
   const btns=[];
   if(onRange)for(const k of Object.keys(RANGES)){
-    const b=document.createElement('button');b.textContent=k;if(k==='ALL')b.className='on';
+    const b=document.createElement('button');b.textContent=k;if(k===active)b.className='on';
     b.onclick=()=>{btns.forEach(x=>x.classList.remove('on'));b.classList.add('on');onRange(k);};btns.push(b);
   }
   const r=document.createElement('button');r.textContent='↺';r.title='重設縮放';r.onclick=onReset;btns.push(r);
   el.prepend(...btns);
 }
 
-// ── 由交易紀錄 replay 出持倉（平均成本法）──
+// ── replay / xirr（全部 USD 計）──
 function replay(txs,asOf){
   const pos={};let cash=0,contributed=0,realised=0,div=0,fee=0;
   for(const [d,code,type,units,price,amt] of txs){
@@ -146,125 +163,143 @@ async function main(){
   const today=px.updated?px.updated.slice(0,10):new Date().toISOString().slice(0,10);
   const short=c=>c.replace('LON:','');
 
-  // ── 頂部 KPI ──
-  const S=replay(txs),value=valueAt(S,prices),pl=value-S.contributed;
-  const irr=xirr([...extFlows(txs),{d:today,v:value}]);
-  $('#upd').textContent='價格更新：'+(px.updated?new Date(px.updated).toLocaleString('zh-HK'):'（未有，去 Actions 跑一次）');
-  $('#kpis').innerHTML=[
-    ['總成本（淨入金）',fmt(S.contributed,0)],
-    ['總市值',fmt(value,0)],
-    ['總盈虧',`<span class="${cls(pl)}">${fmt(pl,0)} (${pct(pl/S.contributed)})</span>`],
-    ['年化 XIRR',`<span class="${cls(irr)}">${pct(irr)}</span>`],
-    ['已實現盈虧',`<span class="${cls(S.realised)}">${fmt(S.realised,0)}</span>`],
-    ['股息 / 費用',`${fmt(S.div,0)} / ${fmt(S.fee,0)}`],
-    ['現金',fmt(S.cash,0)],
-  ].map(([l,v])=>`<div class="kpi"><div class="l">${l}</div><div class="v">${v}</div></div>`).join('');
+  // 匯率
+  const fxOk=prices['FX:USDHKD']!=null;
+  if(fxOk)FX=prices['FX:USDHKD'];
+  FXH=Object.keys(hist).sort().filter(d=>hist[d]['FX:USDHKD']!=null).map(d=>[d,hist[d]['FX:USDHKD']]);
 
-  // ── Tab 1 持倉（撳行跳去個股）──
-  let rows='',tc=0,tv=0;
-  const codes=Object.keys(S.pos).sort((a,b)=>(S.pos[b].units>0)-(S.pos[a].units>0)||a.localeCompare(b));
-  for(const c of codes){
-    const p=S.pos[c],open=p.units>0,pr=prices[c],mv=open?p.units*(pr??0):0,u=mv-p.cost;
-    tc+=p.cost;tv+=mv;
-    rows+=`<tr data-code="${c}" class="${open?'':'closed'}"><td>${short(c)}</td><td class="l">${names[c]?.name||''}</td>
-      <td>${open?fmt(p.units,0):'–'}</td><td>${open?fmt(p.cost,0):'–'}</td><td>${open?fmt(p.cost/p.units):'–'}</td>
-      <td>${fmt(pr)}</td><td>${open?fmt(mv,0):'–'}</td>
-      <td class="${cls(u)}">${open?fmt(u,0):'–'}</td><td class="${cls(u)}">${open?pct(u/p.cost):'–'}</td>
-      <td class="${cls(p.realised)}">${p.realised?fmt(p.realised,0):'–'}</td></tr>`;
-  }
-  $('#holdT').innerHTML=`<table><thead><tr><th>代號</th><th class="l">名稱</th><th>股數</th><th>成本</th><th>平均價</th><th>現價</th><th>市值</th><th>未實現</th><th>%</th><th>已實現</th></tr></thead>
-    <tbody>${rows}</tbody><tfoot><tr><td colspan="3">合計（不含現金）</td><td>${fmt(tc,0)}</td><td></td><td></td><td>${fmt(tv,0)}</td>
-    <td class="${cls(tv-tc)}">${fmt(tv-tc,0)}</td><td class="${cls(tv-tc)}">${pct((tv-tc)/tc)}</td><td class="${cls(S.realised)}">${fmt(S.realised,0)}</td></tr></tfoot></table>`;
-  $('#holdT').querySelectorAll('tr[data-code]').forEach(r=>r.onclick=()=>{$('#instSel').value=r.dataset.code;drawInst(r.dataset.code);showTab('inst');});
-
-  // ── Tab 2 交易 ──
-  $('#txT').innerHTML=`<table><thead><tr><th>日期</th><th class="l">代號</th><th class="l">類型</th><th>單位</th><th>價格</th><th>金額</th></tr></thead><tbody>${
-    [...txs].reverse().map(([d,c,t,u,p,a])=>`<tr><td>${d}</td><td class="l">${short(c)}</td><td class="l">${t}</td><td>${u?fmt(u,0):''}</td><td>${p?fmt(p):''}</td><td>${fmt(a)}</td></tr>`).join('')
-  }</tbody></table>`;
-
-  // ── 每個交易日 snapshot 一次（Tab 3 同 Tab 4 共用）──
+  // 每個交易日 snapshot（USD，貨幣無關，只計一次）
   const snaps=[];let last={};
   for(const d of Object.keys(hist).sort()){
-    if(d<txs[0][0])continue;
     last={...last,...hist[d]};
+    if(d<txs[0][0]||Object.keys(hist[d]).every(k=>k.startsWith('FX:')))continue;   // 只有匯率冇股價嘅日子跳過
     snaps.push({d,S:replay(txs,d),px:{...last}});
   }
-
-  // ── Tab 3 歷史 ──
+  const S=replay(txs),value=valueAt(S,prices),pl=value-S.contributed;
+  const irr=xirr([...extFlows(txs),{d:today,v:value}]);
   const H=snaps.map(({d,S:st,px:p})=>{
     const v=valueAt(st,p),old=(new Date(d)-new Date(txs[0][0]))>25*86400000;
     return {d,cost:st.contributed,v,pl:v-st.contributed,irr:old?xirr([...extFlows(txs,d),{d,v}]):null};
   });
-  $('#histT').innerHTML=`<table><thead><tr><th>日期</th><th>總成本</th><th>總市值</th><th>盈虧</th><th>%</th><th>XIRR</th></tr></thead><tbody>${
-    [...H].reverse().map(h=>`<tr><td>${h.d}</td><td>${fmt(h.cost,0)}</td><td>${fmt(h.v,0)}</td><td class="${cls(h.pl)}">${fmt(h.pl,0)}</td><td class="${cls(h.pl)}">${pct(h.pl/h.cost)}</td><td class="${cls(h.irr)}">${pct(h.irr)}</td></tr>`).join('')
-  }</tbody></table>`;
-  const drawHist=r=>{
-    charts.hist?.destroy();const D=sliceR(H,r);
-    charts.hist=new Chart($('#chart'),{type:'line',data:{labels:D.map(h=>h.d),datasets:[
-      {label:'總市值',data:D.map(h=>h.v),borderColor:'#0a7d3b',pointRadius:0,tension:.2},
-      {label:'總成本',data:D.map(h=>h.cost),borderColor:'#999',borderDash:[4,4],pointRadius:0,stepped:true}]},options:base()});
-  };
-  mkBar($('#histBar'),drawHist,()=>charts.hist?.resetZoom());
-  if(H.length)drawHist('ALL');
-
-  // ── Tab 4 個股 ──
   const held=Object.keys(names).filter(c=>S.pos[c]);
+  let tc=0,tv=0;for(const c of held){const p=S.pos[c];tc+=p.cost;if(p.units>0)tv+=p.units*(prices[c]??0);}
+
+  // UI 狀態（切換貨幣後保留）
+  let histRange='ALL',instCode='';
   const sel=$('#instSel');
   sel.innerHTML=`<option value="">全部 · 價格重設為 100（${snaps[0]?.d||''}）</option>`+
     held.map(c=>`<option value="${c}">${short(c)} · ${names[c].name}</option>`).join('');
-  sel.onchange=()=>drawInst(sel.value);
-  mkBar($('#instBar'),null,()=>charts.inst?.resetZoom());
+  sel.onchange=()=>{instCode=sel.value;drawInst();};
+  $('#curSeg').querySelectorAll('button').forEach(b=>b.onclick=()=>{CUR=b.dataset.c;localStorage.setItem('cur',CUR);render();});
 
-  function drawInst(code){
+  function render(){
+    $('#curSeg').querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.c===CUR));
+    Object.keys(charts).forEach(k=>{charts[k]?.destroy();delete charts[k];});
+    $('#upd').textContent='價格更新：'+(px.updated?new Date(px.updated).toLocaleString('zh-HK'):'（未有，去 Actions 跑一次）')
+      +(CUR==='HKD'?` · USD/HKD ${fmt(FX,4)}`+(fxOk?'':'（未抓到匯率，暫用 7.80）'):'');
+
+    // ── 頂部 KPI ──
+    $('#kpis').innerHTML=[
+      [`總成本（淨入金）${CUR}`,M(S.contributed,0)],
+      [`總市值 ${CUR}`,M(value,0)],
+      ['總盈虧',`<span class="${cls(pl)}">${M(pl,0)} (${pct(pl/S.contributed)})</span>`],
+      ['年化 XIRR',`<span class="${cls(irr)}">${pct(irr)}</span>`],
+      ['已實現盈虧',`<span class="${cls(S.realised)}">${M(S.realised,0)}</span>`],
+      ['股息 / 費用',`${M(S.div,0)} / ${M(S.fee,0)}`],
+      ['現金',M(S.cash,0)],
+    ].map(([l,v])=>`<div class="kpi"><div class="l">${l}</div><div class="v">${v}</div></div>`).join('');
+
+    // ── Tab 1 持倉 ──
+    let rows='';
+    const codes=Object.keys(S.pos).sort((a,b)=>(S.pos[b].units>0)-(S.pos[a].units>0)||a.localeCompare(b));
+    for(const c of codes){
+      const p=S.pos[c],open=p.units>0,pr=prices[c],mv=open?p.units*(pr??0):0,u=mv-p.cost;
+      rows+=`<tr data-code="${c}" class="${open?'':'closed'}"><td>${short(c)}</td><td class="l">${names[c]?.name||''}</td>
+        <td>${open?fmt(p.units,0):'–'}</td><td>${open?M(p.cost,0):'–'}</td><td>${open?M(p.cost/p.units):'–'}</td>
+        <td>${M(pr)}</td><td>${open?M(mv,0):'–'}</td>
+        <td class="${cls(u)}">${open?M(u,0):'–'}</td><td class="${cls(u)}">${open?pct(u/p.cost):'–'}</td>
+        <td class="${cls(p.realised)}">${p.realised?M(p.realised,0):'–'}</td></tr>`;
+    }
+    $('#holdT').innerHTML=`<table><thead><tr><th>代號</th><th class="l">名稱</th><th>股數</th><th>成本</th><th>平均價</th><th>現價</th><th>市值</th><th>未實現</th><th>%</th><th>已實現</th></tr></thead>
+      <tbody>${rows}</tbody><tfoot><tr><td colspan="3">合計（不含現金）${CUR}</td><td>${M(tc,0)}</td><td></td><td></td><td>${M(tv,0)}</td>
+      <td class="${cls(tv-tc)}">${M(tv-tc,0)}</td><td class="${cls(tv-tc)}">${pct((tv-tc)/tc)}</td><td class="${cls(S.realised)}">${M(S.realised,0)}</td></tr></tfoot></table>`;
+    $('#holdT').querySelectorAll('tr[data-code]').forEach(r=>r.onclick=()=>{instCode=sel.value=r.dataset.code;drawInst();showTab('inst');});
+
+    // ── Tab 2 交易（用交易當日匯率）──
+    $('#txT').innerHTML=`<table><thead><tr><th>日期</th><th class="l">代號</th><th class="l">類型</th><th>單位</th><th>價格</th><th>金額 ${CUR}</th></tr></thead><tbody>${
+      [...txs].reverse().map(([d,c,t,u,p,a])=>{const r=R(d);return `<tr><td>${d}</td><td class="l">${short(c)}</td><td class="l">${t}</td><td>${u?fmt(u,0):''}</td><td>${p?M(p,2,r):''}</td><td>${M(a,2,r)}</td></tr>`;}).join('')
+    }</tbody></table>`;
+
+    // ── Tab 3 歷史（每日用當日匯率）──
+    $('#histT').innerHTML=`<table><thead><tr><th>日期</th><th>總成本</th><th>總市值</th><th>盈虧</th><th>%</th><th>XIRR</th></tr></thead><tbody>${
+      [...H].reverse().map(h=>{const r=R(h.d);return `<tr><td>${h.d}</td><td>${M(h.cost,0,r)}</td><td>${M(h.v,0,r)}</td><td class="${cls(h.pl)}">${M(h.pl,0,r)}</td><td class="${cls(h.pl)}">${pct(h.pl/h.cost)}</td><td class="${cls(h.irr)}">${pct(h.irr)}</td></tr>`;}).join('')
+    }</tbody></table>`;
+    const drawHist=rg=>{
+      histRange=rg;charts.hist?.destroy();const D=sliceR(H,rg);
+      charts.hist=new Chart($('#chart'),{type:'line',data:{labels:D.map(h=>h.d),datasets:[
+        {label:`總市值 ${CUR}`,data:D.map(h=>h.v*R(h.d)),borderColor:'#0a7d3b',pointRadius:0,tension:.2},
+        {label:`總成本 ${CUR}`,data:D.map(h=>h.cost*R(h.d)),borderColor:'#999',borderDash:[4,4],pointRadius:0,stepped:true}]},options:base()});
+    };
+    mkBar($('#histBar'),histRange,drawHist,()=>charts.hist?.resetZoom());
+    if(H.length)drawHist(histRange);
+
+    // ── Tab 4 個股 ──
+    mkBar($('#instBar'),null,null,()=>charts.inst?.resetZoom());
+    if(snaps.length)drawInst();
+  }
+
+  function drawInst(){
+    const code=instCode;
     charts.inst?.destroy();
-    if(!code){                                       // 全部：重設 100 疊圖 + 總結表
+    if(!code){
       const ds=held.map((c,i)=>{let b=null;return {label:short(c),borderColor:`hsl(${Math.round(i*360/held.length)} 60% 45%)`,
         pointRadius:0,tension:.2,spanGaps:true,borderWidth:1.5,
         data:snaps.map(s=>{const p=s.px[c];if(p==null)return null;b??=p;return p/b*100;})};});
       const o=base();o.scales.y.ticks.callback=v=>v.toFixed(0);
       charts.inst=new Chart($('#instChart'),{type:'line',data:{labels:snaps.map(s=>s.d),datasets:ds},options:o});
       $('#instKpi').innerHTML='';
-      const R=held.map(c=>{
+      const Rw=held.map(c=>{
         const first=snaps.find(s=>s.px[c]!=null)?.px[c],p=S.pos[c],open=p.units>0,mv=open?p.units*(prices[c]??0):0,u=mv-p.cost;
         return {c,open,chg:first?prices[c]/first-1:null,u,r:p.realised,tot:u+p.realised,irr:xirr([...instFlows(txs,c),{d:today,v:mv}]),w:mv/value};
       }).sort((a,b)=>b.tot-a.tot);
-      $('#instT').innerHTML=`<table><thead><tr><th>代號</th><th class="l">名稱</th><th>價格變動</th><th>未實現</th><th>已實現</th><th>合計貢獻</th><th>個股 XIRR</th><th>佔倉</th></tr></thead><tbody>${
-        R.map(x=>`<tr data-code="${x.c}" class="${x.open?'':'closed'}"><td>${short(x.c)}</td><td class="l">${names[x.c].name}</td>
-          <td class="${cls(x.chg)}">${pct(x.chg)}</td><td class="${cls(x.u)}">${x.open?fmt(x.u,0):'–'}</td><td class="${cls(x.r)}">${x.r?fmt(x.r,0):'–'}</td>
-          <td class="${cls(x.tot)}">${fmt(x.tot,0)}</td><td class="${cls(x.irr)}">${pct(x.irr)}</td><td>${x.open?pct(x.w):'–'}</td></tr>`).join('')
-      }</tbody><tfoot><tr><td colspan="3">合計</td><td class="${cls(tv-tc)}">${fmt(tv-tc,0)}</td><td class="${cls(S.realised)}">${fmt(S.realised,0)}</td>
-        <td class="${cls(tv-tc+S.realised)}">${fmt(tv-tc+S.realised,0)}</td><td></td><td>${pct(tv/value)}</td></tr></tfoot></table>`;
-      $('#instT').querySelectorAll('tr[data-code]').forEach(r=>r.onclick=()=>{sel.value=r.dataset.code;drawInst(r.dataset.code);});
+      $('#instT').innerHTML=`<table><thead><tr><th>代號</th><th class="l">名稱</th><th>價格變動</th><th>未實現</th><th>已實現</th><th>合計貢獻 ${CUR}</th><th>個股 XIRR</th><th>佔倉</th></tr></thead><tbody>${
+        Rw.map(x=>`<tr data-code="${x.c}" class="${x.open?'':'closed'}"><td>${short(x.c)}</td><td class="l">${names[x.c].name}</td>
+          <td class="${cls(x.chg)}">${pct(x.chg)}</td><td class="${cls(x.u)}">${x.open?M(x.u,0):'–'}</td><td class="${cls(x.r)}">${x.r?M(x.r,0):'–'}</td>
+          <td class="${cls(x.tot)}">${M(x.tot,0)}</td><td class="${cls(x.irr)}">${pct(x.irr)}</td><td>${x.open?pct(x.w):'–'}</td></tr>`).join('')
+      }</tbody><tfoot><tr><td colspan="3">合計</td><td class="${cls(tv-tc)}">${M(tv-tc,0)}</td><td class="${cls(S.realised)}">${M(S.realised,0)}</td>
+        <td class="${cls(tv-tc+S.realised)}">${M(tv-tc+S.realised,0)}</td><td></td><td>${pct(tv/value)}</td></tr></tfoot></table>`;
+      $('#instT').querySelectorAll('tr[data-code]').forEach(r=>r.onclick=()=>{instCode=sel.value=r.dataset.code;drawInst();});
       return;
     }
-    // 單隻：市值 / 成本 / 現價
-    const R=[];
+    // 單隻
+    const rows=[];
     for(const {d,S:st,px:p} of snaps){
       const q=st.pos[code],pr=p[code];if(!q||pr==null)continue;
-      const mv=q.units*pr;R.push({d,units:q.units,cost:q.cost,avg:q.units?q.cost/q.units:null,px:pr,mv,u:mv-q.cost,realised:q.realised});
+      const mv=q.units*pr;rows.push({d,r:R(d),units:q.units,cost:q.cost,avg:q.units?q.cost/q.units:null,px:pr,mv,u:mv-q.cost,realised:q.realised});
     }
     const o=base();o.scales.y1={position:'right',grid:{drawOnChartArea:false}};
-    charts.inst=new Chart($('#instChart'),{type:'line',data:{labels:R.map(x=>x.d),datasets:[
-      {label:'市值',data:R.map(x=>x.mv),borderColor:'#0a7d3b',pointRadius:0,tension:.2,yAxisID:'y'},
-      {label:'成本',data:R.map(x=>x.cost),borderColor:'#999',borderDash:[4,4],pointRadius:0,stepped:true,yAxisID:'y'},
-      {label:'現價',data:R.map(x=>x.px),borderColor:'#2c5fd1',pointRadius:0,tension:.2,borderWidth:1,yAxisID:'y1'}]},options:o});
+    charts.inst=new Chart($('#instChart'),{type:'line',data:{labels:rows.map(x=>x.d),datasets:[
+      {label:`市值 ${CUR}`,data:rows.map(x=>x.mv*x.r),borderColor:'#0a7d3b',pointRadius:0,tension:.2,yAxisID:'y'},
+      {label:`成本 ${CUR}`,data:rows.map(x=>x.cost*x.r),borderColor:'#999',borderDash:[4,4],pointRadius:0,stepped:true,yAxisID:'y'},
+      {label:`現價 ${CUR}`,data:rows.map(x=>x.px*x.r),borderColor:'#2c5fd1',pointRadius:0,tension:.2,borderWidth:1,yAxisID:'y1'}]},options:o});
     const p=S.pos[code],open=p.units>0,pr=prices[code],mv=open?p.units*(pr??0):0,u=mv-p.cost;
     const firstBuy=txs.find(t=>t[1]===code&&t[2]==='Buy'),iirr=xirr([...instFlows(txs,code),{d:today,v:mv}]);
     $('#instKpi').innerHTML=[
       ['股數',open?fmt(p.units,0):'已清倉'],
-      ['平均成本 / 現價',open?`${fmt(p.cost/p.units)} / ${fmt(pr)}`:fmt(pr)],
-      ['市值',fmt(mv,0)],
-      ['未實現',`<span class="${cls(u)}">${open?fmt(u,0)+' ('+pct(u/p.cost)+')':'–'}</span>`],
-      ['已實現',`<span class="${cls(p.realised)}">${fmt(p.realised,0)}</span>`],
+      [`平均成本 / 現價 ${CUR}`,open?`${M(p.cost/p.units)} / ${M(pr)}`:M(pr)],
+      [`市值 ${CUR}`,M(mv,0)],
+      ['未實現',`<span class="${cls(u)}">${open?M(u,0)+' ('+pct(u/p.cost)+')':'–'}</span>`],
+      ['已實現',`<span class="${cls(p.realised)}">${M(p.realised,0)}</span>`],
       ['個股 XIRR',`<span class="${cls(iirr)}">${pct(iirr)}</span>`],
       ['價格變動（自首次買入 '+firstBuy[0]+'）',`<span class="${cls(pr/firstBuy[4]-1)}">${pct(pr/firstBuy[4]-1)}</span>`],
     ].map(([l,v])=>`<div class="kpi"><div class="l">${l}</div><div class="v">${v}</div></div>`).join('');
     $('#instT').innerHTML=`<table><thead><tr><th>日期</th><th>股數</th><th>成本</th><th>平均價</th><th>現價</th><th>市值</th><th>未實現</th><th>%</th><th>已實現</th></tr></thead><tbody>${
-      [...R].reverse().map(x=>`<tr class="${x.units?'':'closed'}"><td>${x.d}</td><td>${fmt(x.units,0)}</td><td>${fmt(x.cost,0)}</td><td>${fmt(x.avg)}</td><td>${fmt(x.px)}</td>
-        <td>${fmt(x.mv,0)}</td><td class="${cls(x.u)}">${x.units?fmt(x.u,0):'–'}</td><td class="${cls(x.u)}">${x.units?pct(x.u/x.cost):'–'}</td><td class="${cls(x.realised)}">${x.realised?fmt(x.realised,0):'–'}</td></tr>`).join('')
+      [...rows].reverse().map(x=>`<tr class="${x.units?'':'closed'}"><td>${x.d}</td><td>${fmt(x.units,0)}</td><td>${M(x.cost,0,x.r)}</td><td>${M(x.avg,2,x.r)}</td><td>${M(x.px,2,x.r)}</td>
+        <td>${M(x.mv,0,x.r)}</td><td class="${cls(x.u)}">${x.units?M(x.u,0,x.r):'–'}</td><td class="${cls(x.u)}">${x.units?pct(x.u/x.cost):'–'}</td><td class="${cls(x.realised)}">${x.realised?M(x.realised,0,x.r):'–'}</td></tr>`).join('')
     }</tbody></table>`;
   }
-  if(snaps.length)drawInst('');
+
+  render();
 }
 main().catch(e=>{$('#upd').textContent='錯誤：'+e.message;console.error(e);});
 </script>
