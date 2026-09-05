@@ -1,3 +1,4 @@
+// fund.js
 (async()=>{
 'use strict';
 const $=s=>document.querySelector(s);
@@ -8,6 +9,32 @@ const cls=n=>n>0?'pos':n<0?'neg':'';
 const DAY_MS=86400000, XIRR_MIN_AGE_DAYS=25, YEAR_MS=31557600000;
 const file=document.body.dataset.file;
 const charts={};
+
+// ── 日期正規化：修正「1-5」呢類漏零、或用「/」分隔嘅日期，
+//    統一轉做 YYYY-MM-DD，避免字串排序錯亂 ──
+function normDate(s){
+  if(s==null)return s;
+  s=String(s).trim().replace(/\//g,'-');
+  const parts=s.split('-');
+  if(parts.length!==3)return s; // 格式唔識就原樣返回，唔擅自估
+  let [y,m,d]=parts;
+  y=y.padStart(4,'0');m=m.padStart(2,'0');d=d.padStart(2,'0');
+  return `${y}-${m}-${d}`;
+}
+function normalizeData(D){
+  if(D.transactions)D.transactions=D.transactions.map(t=>[normDate(t[0]),...t.slice(1)]);
+  for(const key of ['prices','balances']){
+    const obj=D[key];if(!obj)continue;
+    for(const f of Object.keys(obj)){
+      const m=obj[f],nm={};
+      for(const k of Object.keys(m))nm[normDate(k)]=m[k];
+      obj[f]=nm;
+    }
+  }
+  return D;
+}
+// 保險：即使日期已經係 YYYY-MM-DD，都用真正日期比較嚟排序，唔靠字串大小
+const byDate=(a,b)=>new Date(a)-new Date(b);
 
 function showError(msg){
   const box=$('#upd');
@@ -56,8 +83,6 @@ function mkBar(el,active,onRange,onReset){
 }
 
 // ── 記帳核心 ──
-// 第 5 個元素 =0 代表「轉換」交易，唔計做供款；undefined/其他值一律當供款
-// （t[4]||'C'==='C' 呢種寫法有 0 係 falsy 嘅陷阱，已改用嚴格比較）
 const isC=t=>t[4]!==0;
 function newState(){return {pos:{},contributed:0,realised:0};}
 function applyTx(state,t){
@@ -91,26 +116,25 @@ function xirr(flows){
     if(Math.abs(nr-r)<1e-8)return nr;
     r=nr;
   }
-  return null; // 200 次未收斂就放棄，唔扔假值
+  return null;
 }
 
-// 價格／結餘序列
+// 價格／結餘序列（sort 改用真正日期比較，唔再靠字串）
 function buildSeries(D,codes,tx){
   const PS={},BS={};
   for(const f of codes){
     const m={...(D.prices?.[f]||{})};
     if(!D.balances?.[f])for(const t of tx)if(t[1]===f&&t[3]!=null)m[t[0]]=t[3];
-    PS[f]=Object.entries(m).sort((a,b)=>a[0]<b[0]?-1:1);
+    PS[f]=Object.entries(m).sort((a,b)=>byDate(a[0],b[0]));
   }
-  for(const [f,m] of Object.entries(D.balances||{}))BS[f]=Object.entries(m).sort((a,b)=>a[0]<b[0]?-1:1);
+  for(const [f,m] of Object.entries(D.balances||{}))BS[f]=Object.entries(m).sort((a,b)=>byDate(a[0],b[0]));
   return {PS,BS};
 }
-// 一次過順序掃描（O(dates+tx)），唔再逐日 replay 全部交易
 function buildTimeline(D,codes,tx){
   const {PS,BS}=buildSeries(D,codes,tx);
   const dateSet=new Set(tx.map(t=>t[0]));
   for(const f of codes){(PS[f]||[]).forEach(([d])=>dateSet.add(d));(BS[f]||[]).forEach(([d])=>dateSet.add(d));}
-  const dates=[...dateSet].filter(d=>d>=tx[0][0]).sort();
+  const dates=[...dateSet].filter(d=>d>=tx[0][0]).sort(byDate);
   const state=newState(),last={},ptr={};
   for(const f of codes)ptr[f]={ps:0,bs:0};
   let ti=0;const flowsSoFar=[],snaps=[];
@@ -134,11 +158,12 @@ try{
   const r=await fetch(file+'?t='+Date.now());
   if(!r.ok)throw new Error(`HTTP ${r.status}`);
   D=await r.json();
+  D=normalizeData(D); // ← 日期正規化，喺呢一步做，之後全部處理都放心用字串比較
 }catch(e){showError(`讀唔到 ${file}（${e.message}）`);console.error(e);return;}
 
 document.title=D.title||file;$('#title').textContent=D.title||file;
 const F=D.funds||{},codes=Object.keys(F);
-const tx=[...(D.transactions||[])].sort((a,b)=>a[0]<b[0]?-1:a[0]>b[0]?1:0);
+const tx=[...(D.transactions||[])].sort((a,b)=>byDate(a[0],b[0]));
 if(!tx.length){showError(`未有交易 — 去 ${file} 加一行`);return;}
 
 const snaps=buildTimeline(D,codes,tx);
