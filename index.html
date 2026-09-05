@@ -380,17 +380,21 @@ async function main(){
     const codes=Object.keys(S.pos).sort((a,b)=>(S.pos[b].units>0)-(S.pos[a].units>0)||a.localeCompare(b));
     for(const c of codes){
       const p=S.pos[c],open=p.units>0,pr=prices[c],mv=open?p.units*(pr??0):0,u=mv-p.cost;
+      const category=esc(names[c]?.category||'未分類');
+      const weight=open?mv/value:null;
       rows+=`<tr data-code="${esc(c)}" class="${open?'':'closed'}"><td>${short(c)}</td><td class="l">${esc(names[c]?.name||'')}</td>
+        <td class="l">${category}</td>
         <td>${open?fmt(p.units,0):'–'}</td><td>${open?M(p.cost,0):'–'}</td><td>${open?M(p.cost/p.units):'–'}</td>
         <td>${M(pr)}</td><td>${open?M(mv,0):'–'}</td>
+        <td>${open?pct(weight):'–'}</td>
         <td class="${cls(u)}">${open?M(u,0):'–'}</td><td class="${cls(u)}">${open?pct(u/p.cost):'–'}</td>
         <td class="${cls(p.realised)}">${p.realised?M(p.realised,0):'–'}</td></tr>`;
     }
-    $('#holdT').innerHTML=`<table><thead><tr><th>代號</th><th class="l">名稱</th><th>股數</th><th>成本</th><th>平均價</th><th>現價</th><th>市值</th><th>未實現</th><th>%</th><th>已實現</th></tr></thead>
-      <tbody>${rows}</tbody><tfoot><tr><td colspan="3">合計（不含現金）${CUR}</td><td>${M(tc,0)}</td><td></td><td></td><td>${M(tv,0)}</td>
+    $('#holdT').innerHTML=`<table><thead><tr><th>代號</th><th class="l">名稱</th><th class="l">分類</th><th>股數</th><th>成本</th><th>平均價</th><th>現價</th><th>市值</th><th>佔倉</th><th>未實現</th><th>%</th><th>已實現</th></tr></thead>
+      <tbody>${rows}</tbody><tfoot><tr><td colspan="4">合計（不含現金）${CUR}</td><td>${M(tc,0)}</td><td></td><td></td><td>${M(tv,0)}</td>
+      <td>${pct(tv/value)}</td>
       <td class="${cls(tv-tc)}">${M(tv-tc,0)}</td><td class="${cls(tv-tc)}">${pct((tv-tc)/tc)}</td><td class="${cls(S.realised)}">${M(S.realised,0)}</td></tr></tfoot></table>`;
     $('#holdT').querySelectorAll('tr[data-code]').forEach(r=>r.onclick=()=>{instCode=sel.value=r.dataset.code;drawInst();showTab('inst');});
-
     // ── Tab 2 交易（篩選 + 用交易當日匯率）──
     drawTx();
 
