@@ -1,20 +1,20 @@
 {
-  "instruments": {
-    "LON:CRPU": {"name": "iShares Global Corp Bond UCITS ETF", "yahoo": "CRPU.L"},
-    "LON:EMCA": {"name": "iShares JP Morgan USD EM Corp Bond UCITS ETF", "yahoo": "EMCA.L"},
-    "LON:IAUP": {"name": "iShares Gold Producers UCITS ETF", "yahoo": "IAUP.L"},
-    "LON:IBTA": {"name": "iShares USD Treasury Bond 1-3yr UCITS ETF", "yahoo": "IBTA.L"},
-    "LON:IDFF": {"name": "iShares MSCI AC Far East ex-Japan UCITS ETF", "yahoo": "IDFF.L"},
-    "LON:ISEU": {"name": "iShares Core MSCI Europe UCITS ETF", "yahoo": "ISEU.L"},
-    "LON:LQDA": {"name": "iShares USD Corp Bond UCITS ETF", "yahoo": "LQDA.L"},
-    "LON:NDIA": {"name": "iShares MSCI India UCITS ETF", "yahoo": "NDIA.L"},
-    "LON:SAJP": {"name": "iShares MSCI Japan Screened UCITS ETF", "yahoo": "SAJP.L"},
-    "LON:SDIA": {"name": "iShares USD Short Duration Corp Bond UCITS ETF", "yahoo": "SDIA.L"},
-    "LON:SPYL": {"name": "SPDR S&P 500 UCITS ETF", "yahoo": "SPYL.L"},
-    "LON:VDTY": {"name": "Vanguard USD Treasury Bond UCITS ETF", "yahoo": "VDTY.L"},
-    "LON:VJPA": {"name": "Vanguard FTSE Japan UCITS ETF", "yahoo": "VJPA.L"},
-    "LON:XMME": {"name": "Xtrackers MSCI Emerging Markets UCITS ETF", "yahoo": "XMME.L"}
-  },
+"instruments": {
+  "LON:CRPU": {"name": "iShares Global Corp Bond UCITS ETF", "yahoo": "CRPU.L", "category": "債券 · 環球企業債"},
+  "LON:EMCA": {"name": "iShares JP Morgan USD EM Corp Bond UCITS ETF", "yahoo": "EMCA.L", "category": "債券 · 新興市場企業債"},
+  "LON:IAUP": {"name": "iShares Gold Producers UCITS ETF", "yahoo": "IAUP.L", "category": "股票 · 黃金礦業"},
+  "LON:IBTA": {"name": "iShares USD Treasury Bond 1-3yr UCITS ETF", "yahoo": "IBTA.L", "category": "債券 · 美國國債(短期)"},
+  "LON:IDFF": {"name": "iShares MSCI AC Far East ex-Japan UCITS ETF", "yahoo": "IDFF.L", "category": "股票 · 亞太(除日本)"},
+  "LON:ISEU": {"name": "iShares Core MSCI Europe UCITS ETF", "yahoo": "ISEU.L", "category": "股票 · 歐洲"},
+  "LON:LQDA": {"name": "iShares USD Corp Bond UCITS ETF", "yahoo": "LQDA.L", "category": "債券 · 美元企業債"},
+  "LON:NDIA": {"name": "iShares MSCI India UCITS ETF", "yahoo": "NDIA.L", "category": "股票 · 印度"},
+  "LON:SAJP": {"name": "iShares MSCI Japan Screened UCITS ETF", "yahoo": "SAJP.L", "category": "股票 · 日本"},
+  "LON:SDIA": {"name": "iShares USD Short Duration Corp Bond UCITS ETF", "yahoo": "SDIA.L", "category": "債券 · 美元短期企業債"},
+  "LON:SPYL": {"name": "SPDR S&P 500 UCITS ETF", "yahoo": "SPYL.L", "category": "股票 · 美國(S&P500)"},
+  "LON:VDTY": {"name": "Vanguard USD Treasury Bond UCITS ETF", "yahoo": "VDTY.L", "category": "債券 · 美國國債"},
+  "LON:VJPA": {"name": "Vanguard FTSE Japan UCITS ETF", "yahoo": "VJPA.L", "category": "股票 · 日本"},
+  "LON:XMME": {"name": "Xtrackers MSCI Emerging Markets UCITS ETF", "yahoo": "XMME.L", "category": "股票 · 新興市場"}
+}
   "transactions": [
     ["2025-11-19","XXX:CASH","In",0,0,250000.00],
     ["2025-11-19","LON:ISEU","Buy",551,40.43,22275.01],
