@@ -14,7 +14,7 @@
   "LON:VDTY": {"name": "Vanguard USD Treasury Bond UCITS ETF", "yahoo": "VDTY.L", "category": "債券 · 美國國債"},
   "LON:VJPA": {"name": "Vanguard FTSE Japan UCITS ETF", "yahoo": "VJPA.L", "category": "股票 · 日本"},
   "LON:XMME": {"name": "Xtrackers MSCI Emerging Markets UCITS ETF", "yahoo": "XMME.L", "category": "股票 · 新興市場"}
-}
+},
   "transactions": [
     ["2025-11-19","XXX:CASH","In",0,0,250000.00],
     ["2025-11-19","LON:ISEU","Buy",551,40.43,22275.01],
