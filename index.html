@@ -40,7 +40,7 @@ canvas{max-height:300px;margin-bottom:12px}
 .bar{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:8px}
 .bar button{padding:7px 12px;min-height:32px;border:1px solid #ccc;border-radius:6px;background:#fff;font-size:12px}
 .bar button.on{background:#222;color:#fff;border-color:#222}
-.bar select{padding:5px 8px;font-size:13px;border-radius:6px;max-width:100%}
+.bar select,.bar input[type=date]{padding:5px 8px;font-size:13px;border-radius:6px;max-width:100%;border:1px solid #ccc}
 .hint{font-size:11px;color:var(--mute);margin-left:auto}
 .errbar{display:inline-flex;align-items:center;gap:8px;color:var(--r)}
 .errbar button{padding:4px 10px;border-radius:6px;border:1px solid var(--r);background:#fff;color:var(--r);cursor:pointer}
@@ -54,7 +54,7 @@ canvas{max-height:300px;margin-bottom:12px}
   nav button{background:#24262a}
   tr[data-code]:hover td{background:#22262e}
   .bar button{background:#1b1d20;border-color:#3a3d42;color:#e8e8e8}
-  .bar select{background:#1b1d20;color:#e8e8e8;border:1px solid #3a3d42}
+  .bar select,.bar input[type=date]{background:#1b1d20;color:#e8e8e8;border:1px solid #3a3d42}
 }
 </style>
 </head>
@@ -75,7 +75,17 @@ canvas{max-height:300px;margin-bottom:12px}
   <button data-t="inst" role="tab" aria-selected="false">個股</button>
 </nav>
 <section id="hold" class="on" role="tabpanel" aria-hidden="false"><div class="wrap" id="holdT"></div></section>
-<section id="tx" role="tabpanel" aria-hidden="true"><div class="wrap" id="txT"></div></section>
+<section id="tx" role="tabpanel" aria-hidden="true">
+  <div class="bar" id="txBar">
+    <select id="txCode"><option value="">全部代號</option></select>
+    <select id="txType"><option value="">全部類型</option></select>
+    <input type="date" id="txFrom" title="開始日期">
+    <input type="date" id="txTo" title="結束日期">
+    <button id="txReset">清除篩選</button>
+    <span class="hint" id="txCount"></span>
+  </div>
+  <div class="wrap" id="txT"></div>
+</section>
 <section id="hist" role="tabpanel" aria-hidden="true">
   <div class="bar" id="histBar"><span class="hint">滾輪／兩指縮放，拖曳平移</span></div>
   <canvas id="chart"></canvas><div class="wrap" id="histT"></div>
@@ -100,6 +110,7 @@ const get=u=>fetch(u+'?t='+Date.now()).then(r=>{
 });
 const charts={};
 const DAY_MS=86400000, XIRR_MIN_AGE_DAYS=25, YEAR_MS=31557600000; // 365.25 天
+const TYPE_LABEL={Buy:'買入',Sell:'賣出',In:'存入',Out:'提取',Dividend:'股息',Fee:'費用'};
 
 function showError(msg){
   const box=$('#upd');
@@ -305,6 +316,42 @@ async function main(){
   sel.onchange=()=>{instCode=sel.value;drawInst();};
   $('#curSeg').querySelectorAll('button').forEach(b=>b.onclick=()=>{CUR=b.dataset.c;localStorage.setItem('cur',CUR);render();});
 
+  // ── 交易篩選（代號 / 類型 / 日期範圍）──
+  const txCodeSel=$('#txCode'),txTypeSel=$('#txType'),txFromInp=$('#txFrom'),txToInp=$('#txTo'),txResetBtn=$('#txReset');
+  const allCodes=[...new Set(txs.map(t=>t[1]))].sort();
+  txCodeSel.innerHTML=`<option value="">全部代號</option>`+
+    allCodes.map(c=>`<option value="${esc(c)}">${c==='XXX:CASH'?'現金':short(c)}</option>`).join('');
+  const allTypes=[...new Set(txs.map(t=>t[2]))];
+  txTypeSel.innerHTML=`<option value="">全部類型</option>`+
+    allTypes.map(t=>`<option value="${esc(t)}">${esc(TYPE_LABEL[t]||t)}</option>`).join('');
+  txFromInp.min=txToInp.min=txs[0][0];
+  txFromInp.max=txToInp.max=txs[txs.length-1][0];
+  [txCodeSel,txTypeSel,txFromInp,txToInp].forEach(el=>el.onchange=drawTx);
+  txResetBtn.onclick=()=>{
+    txCodeSel.value='';txTypeSel.value='';txFromInp.value='';txToInp.value='';
+    drawTx();
+  };
+
+  function filteredTxs(){
+    const code=txCodeSel.value,type=txTypeSel.value,from=txFromInp.value,to=txToInp.value;
+    return txs.filter(t=>{
+      if(code&&t[1]!==code)return false;
+      if(type&&t[2]!==type)return false;
+      if(from&&t[0]<from)return false;
+      if(to&&t[0]>to)return false;
+      return true;
+    });
+  }
+  function drawTx(){
+    const list=filteredTxs();
+    $('#txCount').textContent=`共 ${list.length} / ${txs.length} 筆`;
+    $('#txT').innerHTML=list.length?`<table><thead><tr><th>日期</th><th class="l">代號</th><th class="l">類型</th><th>單位</th><th>價格</th><th>金額 ${CUR}</th></tr></thead><tbody>${
+      [...list].reverse().map(([d,c,t,u,p,a])=>{const r=R(d);
+        return `<tr><td>${esc(d)}</td><td class="l">${c==='XXX:CASH'?'現金':short(c)}</td><td class="l">${esc(TYPE_LABEL[t]||t)}</td><td>${u?fmt(u,0):''}</td><td>${p?M(p,2,r):''}</td><td>${M(a,2,r)}</td></tr>`;
+      }).join('')
+    }</tbody></table>`:'<div class="sub">無符合條件的交易</div>';
+  }
+
   function render(){
     $('#curSeg').querySelectorAll('button').forEach(b=>{
       const on=b.dataset.c===CUR;
@@ -344,10 +391,8 @@ async function main(){
       <td class="${cls(tv-tc)}">${M(tv-tc,0)}</td><td class="${cls(tv-tc)}">${pct((tv-tc)/tc)}</td><td class="${cls(S.realised)}">${M(S.realised,0)}</td></tr></tfoot></table>`;
     $('#holdT').querySelectorAll('tr[data-code]').forEach(r=>r.onclick=()=>{instCode=sel.value=r.dataset.code;drawInst();showTab('inst');});
 
-    // ── Tab 2 交易（用交易當日匯率）──
-    $('#txT').innerHTML=`<table><thead><tr><th>日期</th><th class="l">代號</th><th class="l">類型</th><th>單位</th><th>價格</th><th>金額 ${CUR}</th></tr></thead><tbody>${
-      [...txs].reverse().map(([d,c,t,u,p,a])=>{const r=R(d);return `<tr><td>${esc(d)}</td><td class="l">${short(c)}</td><td class="l">${esc(t)}</td><td>${u?fmt(u,0):''}</td><td>${p?M(p,2,r):''}</td><td>${M(a,2,r)}</td></tr>`;}).join('')
-    }</tbody></table>`;
+    // ── Tab 2 交易（篩選 + 用交易當日匯率）──
+    drawTx();
 
     // ── Tab 3 歷史（每日用當日匯率）──
     $('#histT').innerHTML=`<table><thead><tr><th>日期</th><th>總成本</th><th>總市值</th><th>盈虧</th><th>%</th><th>XIRR</th></tr></thead><tbody>${
