@@ -4,7 +4,6 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>DigiPortfolio</title>
-<!-- TODO: 建議加 integrity + crossorigin="anonymous"（SRI），去 jsdelivr 對應版本頁複製 hash -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" integrity="sha384-9nhczxUqK87bcKHh20fSQcTGD4qq5GhayNYSYWqwBkINBhOfQLg/P5HG5lF1urn4" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js" integrity="sha384-Cs3dgUx6+jDxxuqHvVH8Onpyj2LF1gKZurLDlhqzuJmUqVYMJ0THTWpxK5Z086Zm" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js" integrity="sha384-zPzbVRXfR492Sd5D+HydTYCxxgHAfgVO8KERbLlpeH5unsmbAEXrscGUUqLZG9BM" crossorigin="anonymous"></script>
@@ -34,6 +33,7 @@ table{border-collapse:collapse;width:100%;white-space:nowrap}
 th,td{padding:6px 8px;text-align:right;border-bottom:1px solid #eee}
 th:first-child,td:first-child,.l{text-align:left}
 th{font-size:11px;color:var(--mute);font-weight:500;position:sticky;top:0;background:var(--card)}
+th[data-key]{cursor:pointer;user-select:none}
 tr.closed td{color:#999}tfoot td{font-weight:600}
 tr[data-code]{cursor:pointer}tr[data-code]:hover td{background:#f3f6ff}
 canvas{max-height:300px;margin-bottom:12px}
@@ -44,6 +44,7 @@ canvas{max-height:300px;margin-bottom:12px}
 .hint{font-size:11px;color:var(--mute);margin-left:auto}
 .errbar{display:inline-flex;align-items:center;gap:8px;color:var(--r)}
 .errbar button{padding:4px 10px;border-radius:6px;border:1px solid var(--r);background:#fff;color:var(--r);cursor:pointer}
+.subhead{margin:16px 4px 6px;font-size:12px;font-weight:600;color:var(--mute)}
 @media (prefers-color-scheme:dark){
   :root{--bg:#111315;--card:#1b1d20;--mute:#9aa0a6}
   body{color:#e8e8e8}
@@ -74,7 +75,11 @@ canvas{max-height:300px;margin-bottom:12px}
   <button data-t="hist" role="tab" aria-selected="false">歷史</button>
   <button data-t="inst" role="tab" aria-selected="false">個股</button>
 </nav>
-<section id="hold" class="on" role="tabpanel" aria-hidden="false"><div class="wrap" id="holdT"></div></section>
+<section id="hold" class="on" role="tabpanel" aria-hidden="false">
+  <div class="wrap" id="holdT"></div>
+  <div class="subhead">分類彙總（股票／債券）</div>
+  <div class="wrap" id="holdAggT"></div>
+</section>
 <section id="tx" role="tabpanel" aria-hidden="true">
   <div class="bar" id="txBar">
     <select id="txCode"><option value="">全部代號</option></select>
@@ -289,6 +294,7 @@ async function main(){
   const prices=px.prices||{};
   const today=px.updated?px.updated.slice(0,10):new Date().toISOString().slice(0,10);
   const short=c=>esc(c.replace('LON:',''));
+  const catOf=c=>(names[c]?.category||'未分類').split('·')[0].trim();
 
   // 匯率
   const fxOk=prices['FX:USDHKD']!=null;
@@ -306,13 +312,15 @@ async function main(){
     return {d,cost:st.contributed,v,pl:v-st.contributed,irr:old?xirr([...flows,{d,v}]):null};
   });
   const held=Object.keys(names).filter(c=>S.pos[c]);
+  const cats=[...new Set(held.map(catOf))];
   let tc=0,tv=0;for(const c of held){const p=S.pos[c];tc+=p.cost;if(p.units>0)tv+=p.units*(prices[c]??0);}
 
   // UI 狀態（切換貨幣後保留）
-  let histRange='ALL',instCode='';
+  let histRange='ALL',instCode='',holdSort={key:'c',dir:1};
   const sel=$('#instSel');
   sel.innerHTML=`<option value="">全部 · 價格重設為 100（${esc(snaps[0]?.d||'')}）</option>`+
-    held.map(c=>`<option value="${esc(c)}">${short(c)} · ${esc(names[c]?.name||'')}</option>`).join('');
+    (cats.length?`<optgroup label="分類彙總">${cats.map(k=>`<option value="CAT:${esc(k)}">${esc(k)}（分類彙總）</option>`).join('')}</optgroup>`:'')+
+    `<optgroup label="個股">${held.map(c=>`<option value="${esc(c)}">${short(c)} · ${esc(names[c]?.name||'')}</option>`).join('')}</optgroup>`;
   sel.onchange=()=>{instCode=sel.value;drawInst();};
   $('#curSeg').querySelectorAll('button').forEach(b=>b.onclick=()=>{CUR=b.dataset.c;localStorage.setItem('cur',CUR);render();});
 
@@ -352,6 +360,83 @@ async function main(){
     }</tbody></table>`:'<div class="sub">無符合條件的交易</div>';
   }
 
+  // ── 持倉排序 ──
+  const HOLD_COLS=[
+    ['c','代號','l'],['name','名稱','l'],['category','分類','l'],
+    ['units','股數'],['cost','成本'],['avg','平均價'],['px','現價'],
+    ['mv','市值'],['weight','佔倉'],['u','未實現'],['upct','%'],['realised','已實現']
+  ];
+  function computeHoldRows(){
+    return Object.keys(S.pos).map(c=>{
+      const p=S.pos[c],open=p.units>0,pr=prices[c],mv=open?p.units*(pr??0):0,u=mv-p.cost;
+      return {
+        c,name:names[c]?.name||'',category:names[c]?.category||'未分類',open,
+        units:open?p.units:null,cost:open?p.cost:null,avg:open?p.cost/p.units:null,
+        px:pr,mv:open?mv:null,weight:open?mv/value:null,u:open?u:null,
+        upct:open&&p.cost?u/p.cost:null,realised:p.realised||null
+      };
+    });
+  }
+  function sortRows(rows,key,dir){
+    return [...rows].sort((a,b)=>{
+      if(a.open!==b.open)return (b.open?1:0)-(a.open?1:0);
+      if(key==='c'||key==='name'||key==='category'){
+        return dir*String(a[key]||'').localeCompare(String(b[key]||''));
+      }
+      const av=a[key]??-Infinity,bv=b[key]??-Infinity;
+      return dir*(av-bv);
+    });
+  }
+  function toggleSort(key){
+    if(holdSort.key===key)holdSort.dir*=-1;
+    else{holdSort.key=key;holdSort.dir=(key==='c'||key==='name'||key==='category')?1:-1;}
+    drawHold();
+  }
+  function drawHold(){
+    const rows=sortRows(computeHoldRows(),holdSort.key,holdSort.dir);
+    const thead=`<tr>${HOLD_COLS.map(([k,label,align])=>{
+      const arrow=holdSort.key===k?(holdSort.dir>0?' ▲':' ▼'):'';
+      return `<th class="${align||''}" data-key="${k}">${label}${arrow}</th>`;
+    }).join('')}</tr>`;
+    const body=rows.map(r=>`<tr data-code="${esc(r.c)}" class="${r.open?'':'closed'}">
+      <td>${short(r.c)}</td><td class="l">${esc(r.name)}</td><td class="l">${esc(r.category)}</td>
+      <td>${r.open?fmt(r.units,0):'–'}</td><td>${r.open?M(r.cost,0):'–'}</td><td>${r.open?M(r.avg):'–'}</td>
+      <td>${M(r.px)}</td><td>${r.open?M(r.mv,0):'–'}</td>
+      <td>${r.open?pct(r.weight):'–'}</td>
+      <td class="${cls(r.u)}">${r.open?M(r.u,0):'–'}</td><td class="${cls(r.u)}">${r.open?pct(r.upct):'–'}</td>
+      <td class="${cls(r.realised)}">${r.realised?M(r.realised,0):'–'}</td></tr>`).join('');
+    $('#holdT').innerHTML=`<table><thead>${thead}</thead><tbody>${body}</tbody>
+      <tfoot><tr><td colspan="4">合計（不含現金）${CUR}</td><td>${M(tc,0)}</td><td></td><td></td><td>${M(tv,0)}</td>
+      <td>${pct(tv/value)}</td>
+      <td class="${cls(tv-tc)}">${M(tv-tc,0)}</td><td class="${cls(tv-tc)}">${pct((tv-tc)/tc)}</td><td class="${cls(S.realised)}">${M(S.realised,0)}</td></tr></tfoot></table>`;
+    $('#holdT').querySelectorAll('th[data-key]').forEach(th=>th.onclick=()=>toggleSort(th.dataset.key));
+    $('#holdT').querySelectorAll('tr[data-code]').forEach(r=>r.onclick=()=>{instCode=sel.value=r.dataset.code;drawInst();showTab('inst');});
+    drawHoldAgg(rows);
+  }
+  function drawHoldAgg(rows){
+    const groups={};
+    for(const r of rows){
+      const k=(r.category||'未分類').split('·')[0].trim();
+      const g=groups[k]||(groups[k]={cost:0,mv:0,realised:0});
+      if(r.open){g.cost+=r.cost;g.mv+=r.mv;}
+      g.realised+=r.realised||0;
+    }
+    const order=['股票','債券'];
+    const keys=Object.keys(groups).sort((a,b)=>{
+      const ia=order.indexOf(a),ib=order.indexOf(b);
+      if(ia===-1&&ib===-1)return a.localeCompare(b);
+      if(ia===-1)return 1;if(ib===-1)return -1;return ia-ib;
+    });
+    const body=keys.map(k=>{
+      const g=groups[k],u=g.mv-g.cost;
+      return `<tr><td class="l">${esc(k)}</td><td>${M(g.cost,0)}</td><td>${M(g.mv,0)}</td>
+        <td>${g.mv?pct(g.mv/value):'–'}</td>
+        <td class="${cls(u)}">${M(u,0)}</td><td class="${cls(u)}">${g.cost?pct(u/g.cost):'–'}</td>
+        <td class="${cls(g.realised)}">${g.realised?M(g.realised,0):'–'}</td></tr>`;
+    }).join('');
+    $('#holdAggT').innerHTML=`<table><thead><tr><th class="l">分類</th><th>成本</th><th>市值</th><th>佔倉</th><th>未實現</th><th>%</th><th>已實現</th></tr></thead><tbody>${body}</tbody></table>`;
+  }
+
   function render(){
     $('#curSeg').querySelectorAll('button').forEach(b=>{
       const on=b.dataset.c===CUR;
@@ -376,34 +461,20 @@ async function main(){
     ].map(([l,v])=>`<div class="kpi"><div class="l">${l}</div><div class="v">${v}</div></div>`).join('');
 
     // ── Tab 1 持倉 ──
-    let rows='';
-    const codes=Object.keys(S.pos).sort((a,b)=>(S.pos[b].units>0)-(S.pos[a].units>0)||a.localeCompare(b));
-    for(const c of codes){
-      const p=S.pos[c],open=p.units>0,pr=prices[c],mv=open?p.units*(pr??0):0,u=mv-p.cost;
-      const category=esc(names[c]?.category||'未分類');
-      const weight=open?mv/value:null;
-      rows+=`<tr data-code="${esc(c)}" class="${open?'':'closed'}"><td>${short(c)}</td><td class="l">${esc(names[c]?.name||'')}</td>
-        <td class="l">${category}</td>
-        <td>${open?fmt(p.units,0):'–'}</td><td>${open?M(p.cost,0):'–'}</td><td>${open?M(p.cost/p.units):'–'}</td>
-        <td>${M(pr)}</td><td>${open?M(mv,0):'–'}</td>
-        <td>${open?pct(weight):'–'}</td>
-        <td class="${cls(u)}">${open?M(u,0):'–'}</td><td class="${cls(u)}">${open?pct(u/p.cost):'–'}</td>
-        <td class="${cls(p.realised)}">${p.realised?M(p.realised,0):'–'}</td></tr>`;
-    }
-    $('#holdT').innerHTML=`<table><thead><tr><th>代號</th><th class="l">名稱</th><th class="l">分類</th><th>股數</th><th>成本</th><th>平均價</th><th>現價</th><th>市值</th><th>佔倉</th><th>未實現</th><th>%</th><th>已實現</th></tr></thead>
-      <tbody>${rows}</tbody><tfoot><tr><td colspan="4">合計（不含現金）${CUR}</td><td>${M(tc,0)}</td><td></td><td></td><td>${M(tv,0)}</td>
-      <td>${pct(tv/value)}</td>
-      <td class="${cls(tv-tc)}">${M(tv-tc,0)}</td><td class="${cls(tv-tc)}">${pct((tv-tc)/tc)}</td><td class="${cls(S.realised)}">${M(S.realised,0)}</td></tr></tfoot></table>`;
-    $('#holdT').querySelectorAll('tr[data-code]').forEach(r=>r.onclick=()=>{instCode=sel.value=r.dataset.code;drawInst();showTab('inst');});
+    drawHold();
+
     // ── Tab 2 交易（篩選 + 用交易當日匯率）──
     drawTx();
 
-    // ── Tab 3 歷史（每日用當日匯率）──
-    $('#histT').innerHTML=`<table><thead><tr><th>日期</th><th>總成本</th><th>總市值</th><th>盈虧</th><th>%</th><th>XIRR</th></tr></thead><tbody>${
-      [...H].reverse().map(h=>{const r=R(h.d);return `<tr><td>${esc(h.d)}</td><td>${M(h.cost,0,r)}</td><td>${M(h.v,0,r)}</td><td class="${cls(h.pl)}">${M(h.pl,0,r)}</td><td class="${cls(h.pl)}">${pct(h.pl/h.cost)}</td><td class="${cls(h.irr)}">${pct(h.irr)}</td></tr>`;}).join('')
-    }</tbody></table>`;
+    // ── Tab 3 歷史（表同圖共用 range）──
+    function drawHistTable(D){
+      $('#histT').innerHTML=`<table><thead><tr><th>日期</th><th>總成本</th><th>總市值</th><th>盈虧</th><th>%</th><th>XIRR</th></tr></thead><tbody>${
+        [...D].reverse().map(h=>{const r=R(h.d);return `<tr><td>${esc(h.d)}</td><td>${M(h.cost,0,r)}</td><td>${M(h.v,0,r)}</td><td class="${cls(h.pl)}">${M(h.pl,0,r)}</td><td class="${cls(h.pl)}">${pct(h.pl/h.cost)}</td><td class="${cls(h.irr)}">${pct(h.irr)}</td></tr>`;}).join('')
+      }</tbody></table>`;
+    }
     const drawHist=rg=>{
       histRange=rg;charts.hist?.destroy();const D=sliceR(H,rg);
+      drawHistTable(D);
       const o=base();
       o.scales.y1={position:'right',grid:{drawOnChartArea:false},ticks:{callback:v=>(v/1000).toFixed(0)+'k'},
         title:{display:true,text:`盈虧 ${CUR}`,font:{size:10}}};
@@ -425,6 +496,51 @@ async function main(){
   function drawInst(){
     const code=instCode;
     charts.inst?.destroy();
+
+    // ── 分類彙總（股票／債券）──
+    if(code.startsWith('CAT:')){
+      const catName=code.slice(4);
+      const codesInCat=held.filter(c=>catOf(c)===catName);
+      const rows=[];
+      for(const {d,S:st,px:p} of snaps){
+        let mv=0,cost=0,realised=0,seen=false;
+        for(const c of codesInCat){
+          const q=st.pos[c];if(!q)continue;seen=true;
+          realised+=q.realised||0;cost+=q.cost;
+          if(q.units>0&&p[c]!=null)mv+=q.units*p[c];
+        }
+        if(!seen)continue;
+        rows.push({d,r:R(d),cost,mv,u:mv-cost,realised});
+      }
+      const o=base();
+      o.scales.y1={position:'right',grid:{drawOnChartArea:false},ticks:{callback:v=>(v/1000).toFixed(0)+'k'},title:{display:true,text:`盈虧 ${CUR}`,font:{size:10}}};
+      charts.inst=new Chart($('#instChart'),{type:'line',data:{labels:rows.map(x=>x.d),datasets:[
+        {label:`市值 ${CUR}`,data:rows.map(x=>x.mv*x.r),borderColor:'#0a7d3b',pointRadius:0,tension:.2,yAxisID:'y'},
+        {label:`成本 ${CUR}`,data:rows.map(x=>x.cost*x.r),borderColor:'#999',borderDash:[4,4],pointRadius:0,stepped:true,yAxisID:'y'},
+        {label:`未實現盈虧 ${CUR}`,data:rows.map(x=>x.u*x.r),pointRadius:0,tension:.2,borderWidth:1.5,yAxisID:'y1',
+          segment:{borderColor:c=>c.p1.parsed.y>=0?'#0a7d3b':'#c0392b'},borderColor:'#0a7d3b',
+          fill:{target:'origin',above:'rgba(10,125,59,.10)',below:'rgba(192,57,43,.10)'}}]},options:o});
+      const mvNow=codesInCat.reduce((s,c)=>{const p=S.pos[c];return s+(p&&p.units>0?p.units*(prices[c]??0):0);},0);
+      const costNow=codesInCat.reduce((s,c)=>s+(S.pos[c]?.cost||0),0);
+      const realisedNow=codesInCat.reduce((s,c)=>s+(S.pos[c]?.realised||0),0);
+      const combinedFlows=codesInCat.flatMap(c=>instFlows(txs,c)).sort((a,b)=>a.d<b.d?-1:a.d>b.d?1:0);
+      const iirr=xirr([...combinedFlows,{d:today,v:mvNow}]);
+      $('#instKpi').innerHTML=[
+        [`市值 ${CUR}`,M(mvNow,0)],
+        [`成本 ${CUR}`,M(costNow,0)],
+        ['未實現',`<span class="${cls(mvNow-costNow)}">${M(mvNow-costNow,0)}${costNow?' ('+pct((mvNow-costNow)/costNow)+')':''}</span>`],
+        ['已實現',`<span class="${cls(realisedNow)}">${M(realisedNow,0)}</span>`],
+        ['分類 XIRR',`<span class="${cls(iirr)}">${pct(iirr)}</span>`],
+        ['佔倉',pct(mvNow/value)],
+      ].map(([l,v])=>`<div class="kpi"><div class="l">${l}</div><div class="v">${v}</div></div>`).join('');
+      $('#instT').innerHTML=`<table><thead><tr><th>日期</th><th>成本</th><th>市值</th><th>未實現</th><th>%</th><th>已實現</th></tr></thead><tbody>${
+        [...rows].reverse().map(x=>`<tr><td>${esc(x.d)}</td><td>${M(x.cost,0,x.r)}</td><td>${M(x.mv,0,x.r)}</td>
+          <td class="${cls(x.u)}">${M(x.u,0,x.r)}</td><td class="${cls(x.u)}">${x.cost?pct(x.u/x.cost):'–'}</td>
+          <td class="${cls(x.realised)}">${x.realised?M(x.realised,0,x.r):'–'}</td></tr>`).join('')
+      }</tbody></table>`;
+      return;
+    }
+
     if(!code){
       const ds=held.map((c,i)=>{let b=null;return {label:short(c),borderColor:`hsl(${Math.round(i*360/held.length)} 60% 45%)`,
         pointRadius:0,tension:.2,spanGaps:true,borderWidth:1.5,
