@@ -45,6 +45,18 @@ canvas{max-height:300px;margin-bottom:12px}
 .errbar{display:inline-flex;align-items:center;gap:8px;color:var(--r)}
 .errbar button{padding:4px 10px;border-radius:6px;border:1px solid var(--r);background:#fff;color:var(--r);cursor:pointer}
 .subhead{margin:16px 4px 6px;font-size:12px;font-weight:600;color:var(--mute)}
+/* ── 新增交易表單 ── */
+.addform{display:none;flex-wrap:wrap;gap:8px;align-items:flex-end;margin:10px 0;padding:10px;border:1px dashed #aaa;border-radius:8px}
+.addform.on{display:flex}
+.addform label{display:flex;flex-direction:column;gap:3px;font-size:11px;color:var(--mute)}
+.addform input,.addform select{padding:6px 8px;font-size:13px;border-radius:6px;border:1px solid #ccc;min-width:110px}
+.addform button{padding:7px 14px;min-height:34px;border-radius:6px;border:1px solid #222;background:#222;color:#fff;font-size:13px;cursor:pointer}
+.addform button#fCancel{background:#fff;color:#222}
+.newwrap{display:none;gap:8px;flex-wrap:wrap}
+.newwrap.on{display:flex}
+#fErr{color:var(--r);flex-basis:100%}
+tr.pending td{background:#fff6dc}
+.rowdel{border:0;background:none;color:var(--r);font-weight:700;cursor:pointer;font-size:16px;padding:0 6px;line-height:1}
 @media (prefers-color-scheme:dark){
   :root{--bg:#111315;--card:#1b1d20;--mute:#9aa0a6}
   body{color:#e8e8e8}
@@ -56,6 +68,10 @@ canvas{max-height:300px;margin-bottom:12px}
   tr[data-code]:hover td{background:#22262e}
   .bar button{background:#1b1d20;border-color:#3a3d42;color:#e8e8e8}
   .bar select,.bar input[type=date]{background:#1b1d20;color:#e8e8e8;border:1px solid #3a3d42}
+  tr.pending td{background:#3a3320}
+  .addform{border-color:#555}
+  .addform button#fCancel{background:#1b1d20;color:#e8e8e8;border-color:#3a3d42}
+  .addform input,.addform select{background:#1b1d20;color:#e8e8e8;border-color:#3a3d42}
 }
 </style>
 </head>
@@ -81,6 +97,31 @@ canvas{max-height:300px;margin-bottom:12px}
   <div class="wrap" id="holdAggT"></div>
 </section>
 <section id="tx" role="tabpanel" aria-hidden="true">
+  <div class="bar" id="txPendingBar" style="display:none">
+    <span class="hint" id="pendingHint"></span>
+    <button id="txExportBtn">⬇ 下載 transactions.json</button>
+    <button id="txClearPendingBtn">🗑 清空本機暫存</button>
+  </div>
+  <div class="bar">
+    <button id="txAddToggle">+ 新增交易</button>
+    <span class="hint">新增後只存喺呢部裝置，記得下載 JSON 去覆蓋 GitHub 嗰份</span>
+  </div>
+  <form id="txAddForm" class="addform">
+    <label>日期<input type="date" id="fDate" required></label>
+    <label>代號<select id="fCode"></select></label>
+    <span id="fNewWrap" class="newwrap">
+      <label>新代號<input id="fNewCode" placeholder="例如 NASDAQ:AAPL"></label>
+      <label>名稱<input id="fNewName" placeholder="公司/基金名稱"></label>
+      <label>分類<input id="fNewCat" placeholder="例如 股票·科技"></label>
+    </span>
+    <label>類型<select id="fType"></select></label>
+    <label id="fUnitsWrap">單位<input type="number" id="fUnits" step="any" min="0"></label>
+    <label id="fPriceWrap">價格<input type="number" id="fPrice" step="any" min="0"></label>
+    <label>金額（USD）<input type="number" id="fAmt" step="any" min="0" required></label>
+    <button type="submit">新增</button>
+    <button type="button" id="fCancel">取消</button>
+    <span id="fErr"></span>
+  </form>
   <div class="bar" id="txBar">
     <select id="txCode"><option value="">全部代號</option></select>
     <select id="txType"><option value="">全部類型</option></select>
@@ -122,6 +163,20 @@ function showError(msg){
   box.classList.remove('loading');
   box.innerHTML=`<span class="errbar">⚠️ ${esc(msg)} <button id="retryBtn">重試</button></span>`;
   const b=$('#retryBtn');if(b)b.onclick=()=>location.reload();
+}
+
+// ── 本機暫存交易（新增交易但未上傳 GitHub，儲喺 localStorage）──
+const LS_TX='dp_pendingTx', LS_INST='dp_pendingInst';
+const loadPendingTx=()=>{try{return JSON.parse(localStorage.getItem(LS_TX)||'[]');}catch{return[];}};
+const savePendingTx=a=>localStorage.setItem(LS_TX,JSON.stringify(a));
+const loadPendingInst=()=>{try{return JSON.parse(localStorage.getItem(LS_INST)||'{}');}catch{return{};}};
+const savePendingInst=o=>localStorage.setItem(LS_INST,JSON.stringify(o));
+function downloadJSON(obj,filename){
+  const blob=new Blob([JSON.stringify(obj,null,2)],{type:'application/json'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url;a.download=filename;document.body.appendChild(a);a.click();a.remove();
+  URL.revokeObjectURL(url);
 }
 
 // ── 貨幣 ──
@@ -275,8 +330,8 @@ async function main(){
     console.error(e);
     return;
   }
-  if(!tx||!Array.isArray(tx.transactions)||!tx.transactions.length){
-    showError('transactions.json 內容不完整或為空。');
+  if(!tx||!Array.isArray(tx.transactions)){
+    showError('transactions.json 內容不完整。');
     return;
   }
   if(!px||typeof px.prices!=='object'){
@@ -288,9 +343,18 @@ async function main(){
     return;
   }
 
+  // ── 讀返本機暫存（未上傳 GitHub 嘅新增交易／新增代號），merge 埋一齊計數 ──
+  let pendingTx=loadPendingTx();
+  let pendingInst=loadPendingInst();
+  if(!tx.transactions.length&&!pendingTx.length){
+    showError('暫時未有任何交易，請按「+ 新增交易」新增第一筆。');
+    return;
+  }
+
   const key=t=>t[0]+(t[1]==='XXX:CASH'&&t[2]==='In'?'0':'1');
-  const txs=[...tx.transactions].sort((a,b)=>key(a)<key(b)?-1:key(a)>key(b)?1:0);
-  const names=tx.instruments||{};
+  const names={...(tx.instruments||{}),...pendingInst};
+  const rawTxs=[...tx.transactions,...pendingTx];
+  const txs=[...rawTxs].sort((a,b)=>key(a)<key(b)?-1:key(a)>key(b)?1:0);
   const prices=px.prices||{};
   const today=px.updated?px.updated.slice(0,10):new Date().toISOString().slice(0,10);
   const short=c=>esc(c.replace('LON:',''));
@@ -324,6 +388,107 @@ async function main(){
   sel.onchange=()=>{instCode=sel.value;drawInst();};
   $('#curSeg').querySelectorAll('button').forEach(b=>b.onclick=()=>{CUR=b.dataset.c;localStorage.setItem('cur',CUR);render();});
 
+  // ── 新增交易表單 ──
+  const addForm=$('#txAddForm'),addToggle=$('#txAddToggle');
+  const fCode=$('#fCode'),fType=$('#fType'),fUnits=$('#fUnits'),fPrice=$('#fPrice'),fAmt=$('#fAmt');
+  const fNewWrap=$('#fNewWrap'),fNewCode=$('#fNewCode'),fNewName=$('#fNewName'),fNewCat=$('#fNewCat');
+  const fUnitsWrap=$('#fUnitsWrap'),fPriceWrap=$('#fPriceWrap'),fErr=$('#fErr');
+  const CASH_TYPES=['In','Out','Dividend','Fee'],INST_TYPES=['Buy','Sell'];
+
+  function fillCodeSelect(){
+    const codes=Object.keys(names).sort();
+    fCode.innerHTML=`<option value="XXX:CASH">現金（XXX:CASH）</option>`+
+      codes.map(c=>`<option value="${esc(c)}">${short(c)} · ${esc(names[c]?.name||'')}</option>`).join('')+
+      `<option value="__NEW__">➕ 新增代號…</option>`;
+  }
+  function fillTypeSelect(){
+    const isCash=fCode.value==='XXX:CASH';
+    const opts=isCash?CASH_TYPES:INST_TYPES;
+    fType.innerHTML=opts.map(t=>`<option value="${t}">${TYPE_LABEL[t]}</option>`).join('');
+    fUnitsWrap.style.display=isCash?'none':'';
+    fPriceWrap.style.display=isCash?'none':'';
+    fUnits.required=!isCash;fPrice.required=!isCash;
+  }
+  fCode.onchange=()=>{
+    fNewWrap.classList.toggle('on',fCode.value==='__NEW__');
+    fillTypeSelect();
+  };
+  let amtTouched=false;
+  fAmt.oninput=()=>amtTouched=true;
+  function recalcAmt(){
+    if(amtTouched)return;
+    const u=parseFloat(fUnits.value),p=parseFloat(fPrice.value);
+    if(isFinite(u)&&isFinite(p))fAmt.value=(u*p).toFixed(2);
+  }
+  fUnits.oninput=recalcAmt;fPrice.oninput=recalcAmt;
+
+  addToggle.onclick=()=>{
+    const opening=!addForm.classList.contains('on');
+    addForm.classList.toggle('on');
+    if(opening){
+      fillCodeSelect();fCode.value='XXX:CASH';
+      fNewWrap.classList.remove('on');
+      fillTypeSelect();
+      $('#fDate').value=today;
+      fUnits.value=fPrice.value=fAmt.value='';
+      fNewCode.value=fNewName.value=fNewCat.value='';
+      amtTouched=false;fErr.textContent='';
+    }
+  };
+  $('#fCancel').onclick=()=>{addForm.classList.remove('on');fErr.textContent='';};
+
+  addForm.onsubmit=e=>{
+    e.preventDefault();
+    fErr.textContent='';
+    const d=$('#fDate').value;
+    if(!d){fErr.textContent='請選日期';return;}
+    let code=fCode.value;
+    const type=fType.value;
+    const amt=parseFloat(fAmt.value);
+    if(!isFinite(amt)||amt<=0){fErr.textContent='請輸入有效金額';return;}
+    let units=0,price=0;
+    if(code==='__NEW__'){
+      code=fNewCode.value.trim();
+      const nm=fNewName.value.trim(),cat=fNewCat.value.trim()||'未分類';
+      if(!code){fErr.textContent='請輸入新代號';return;}
+      if(names[code]){fErr.textContent='代號已存在，請直接喺清單揀';return;}
+      pendingInst={...pendingInst,[code]:{name:nm,category:cat}};
+      savePendingInst(pendingInst);
+      names[code]={name:nm,category:cat};
+    }
+    if(code!=='XXX:CASH'){
+      units=parseFloat(fUnits.value);price=parseFloat(fPrice.value);
+      if(!isFinite(units)||units<=0||!isFinite(price)||price<=0){fErr.textContent='請輸入單位同價格';return;}
+    }
+    const pid='p'+Date.now()+Math.random().toString(36).slice(2,7);
+    pendingTx=[...pendingTx,[d,code,type,units,price,amt,pid]];
+    savePendingTx(pendingTx);
+    location.reload();
+  };
+
+  // ── 本機暫存 bar（下載完整 JSON / 清空）──
+  function refreshPendingBar(){
+    const bar=$('#txPendingBar');
+    if(pendingTx.length){
+      bar.style.display='';
+      $('#pendingHint').textContent=`本機暫存 ${pendingTx.length} 筆未上傳 —— 下載後覆蓋 GitHub 嗰份 transactions.json，再撳「清空本機暫存」`;
+    }else{
+      bar.style.display='none';
+    }
+    const txNavBtn=document.querySelector('nav button[data-t="tx"]');
+    if(txNavBtn)txNavBtn.textContent='交易'+(pendingTx.length?` (${pendingTx.length})`:'');
+  }
+  $('#txExportBtn').onclick=()=>{
+    const merged={...tx,instruments:names,transactions:txs.map(t=>t.slice(0,6))};
+    downloadJSON(merged,'transactions.json');
+  };
+  $('#txClearPendingBtn').onclick=()=>{
+    if(!confirm('確定要清空本機暫存嘅新增交易？（請先確認已經上傳咗去 GitHub，唔然啲交易會冇咗）'))return;
+    localStorage.removeItem(LS_TX);localStorage.removeItem(LS_INST);
+    location.reload();
+  };
+  refreshPendingBar();
+
   // ── 交易篩選（代號 / 類型 / 日期範圍）──
   const txCodeSel=$('#txCode'),txTypeSel=$('#txType'),txFromInp=$('#txFrom'),txToInp=$('#txTo'),txResetBtn=$('#txReset');
   const allCodes=[...new Set(txs.map(t=>t[1]))].sort();
@@ -353,11 +518,19 @@ async function main(){
   function drawTx(){
     const list=filteredTxs();
     $('#txCount').textContent=`共 ${list.length} / ${txs.length} 筆`;
-    $('#txT').innerHTML=list.length?`<table><thead><tr><th>日期</th><th class="l">代號</th><th class="l">類型</th><th>單位</th><th>價格</th><th>金額 ${CUR}</th></tr></thead><tbody>${
-      [...list].reverse().map(([d,c,t,u,p,a])=>{const r=R(d);
-        return `<tr><td>${esc(d)}</td><td class="l">${c==='XXX:CASH'?'現金':short(c)}</td><td class="l">${esc(TYPE_LABEL[t]||t)}</td><td>${u?fmt(u,0):''}</td><td>${p?M(p,2,r):''}</td><td>${M(a,2,r)}</td></tr>`;
+    $('#txT').innerHTML=list.length?`<table><thead><tr><th>日期</th><th class="l">代號</th><th class="l">類型</th><th>單位</th><th>價格</th><th>金額 ${CUR}</th><th></th></tr></thead><tbody>${
+      [...list].reverse().map(row=>{
+        const [d,c,t,u,p,a,pid]=row;const r=R(d);
+        return `<tr class="${pid?'pending':''}"><td>${esc(d)}</td><td class="l">${c==='XXX:CASH'?'現金':short(c)}</td><td class="l">${esc(TYPE_LABEL[t]||t)}</td><td>${u?fmt(u,0):''}</td><td>${p?M(p,2,r):''}</td><td>${M(a,2,r)}</td><td>${pid?`<button class="rowdel" data-pid="${pid}" title="刪除呢筆暫存交易">×</button>`:''}</td></tr>`;
       }).join('')
     }</tbody></table>`:'<div class="sub">無符合條件的交易</div>';
+    $('#txT').querySelectorAll('.rowdel').forEach(b=>b.onclick=e=>{
+      e.stopPropagation();
+      const pid=b.dataset.pid;
+      pendingTx=pendingTx.filter(x=>x[6]!==pid);
+      savePendingTx(pendingTx);
+      location.reload();
+    });
   }
 
   // ── 持倉排序 ──
