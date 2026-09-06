@@ -57,14 +57,19 @@
 
   .chart-wrap{position:relative;height:380px;}
   .note{font-size:12px;color:var(--sub);margin-top:10px;line-height:1.6;}
+  .note code{background:var(--card2);padding:2px 5px;border-radius:4px;}
   .table-wrap{max-height:520px;overflow:auto;}
   select#fundSelect{margin-bottom:14px;}
+
+  .bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px;}
+  .bar .hint{font-size:12px;color:var(--sub);margin-left:auto;}
 </style>
 </head>
 <body>
 
 <header>
   <h1>💰 我的強積金 (MPF) 投資組合</h1>
+  <div class="sub">American / Asia / Global / Growth · 全部以 HKD 顯示 · 數據為近似值，僅供參考走勢</div>
 </header>
 
 <div class="cards" id="summaryCards"></div>
@@ -94,8 +99,27 @@
 
 <!-- 供款記錄 -->
 <div class="tab-content" id="tab-transactions">
+
   <div class="panel">
-    <h3>➕ 新增供款 / 基金轉換</h3>
+    <h3>📂 資料來源管理</h3>
+    <div class="form-row">
+      <div>
+        <label>載入外部 JSON（會覆蓋內建數據，並存落呢部電腦）</label>
+        <input type="file" id="fileInput" accept="application/json" onchange="handleFileLoad(event)">
+      </div>
+      <div><button class="action secondary" onclick="restoreDefault()">↺ 還原內建預設數據</button></div>
+      <div><button class="action secondary" onclick="exportData()">⬇ 匯出目前資料 (JSON)</button></div>
+      <div><button class="action danger" onclick="clearPending()">🗑 清空暫存交易</button></div>
+    </div>
+    <div class="note">
+      載入／匯出用嘅 JSON 格式：<code>{"American":{"rows":[[日期,股數,單位價,佣金],...]},"Asia":{...},"Global":{...},"Growth":{...}}</code>。
+      呢個 html 淨係讀你部電腦本機嘅檔案（file input），唔會上傳去任何地方；載入後存喺瀏覽器 localStorage，
+      下次開返呢個 html 都仲喺度，直到你撳「還原內建預設數據」。
+    </div>
+  </div>
+
+  <div class="panel">
+    <h3>➕ 新增供款 / 基金轉換（暫存）</h3>
     <div class="form-row">
       <div>
         <label>日期</label>
@@ -126,20 +150,24 @@
     </div>
     <div class="note">
       呢個表單新增嘅記錄只會存喺你呢部電腦嘅瀏覽器 (localStorage)，唔會自動上傳。
-      要保留就用「匯出 JSON」下載成檔案，自己更新落去資料源；唔要就用「清空暫存」刪走。
-    </div>
-    <div class="form-row" style="margin-top:10px;">
-      <button class="action secondary" onclick="exportData()">⬇ 匯出全部資料 (JSON)</button>
-      <button class="action danger" onclick="clearPending()">🗑 清空暫存交易</button>
+      要保留就用上面「匯出 JSON」下載成檔案；唔要就用「清空暫存」刪走。
     </div>
   </div>
 
   <div class="panel">
-    <h3>供款 / 轉換歷史</h3>
+    <h3>供款 / 轉換歷史（合併4隻基金，最新在上，可篩選）</h3>
+    <div class="bar" id="txFilterBar">
+      <select id="txFundFilter"></select>
+      <select id="txTypeFilter"></select>
+      <input type="date" id="txFromDate" title="開始日期">
+      <input type="date" id="txToDate" title="結束日期">
+      <button class="action secondary" id="txResetBtn">清除篩選</button>
+      <span class="hint" id="txCountHint"></span>
+    </div>
     <div class="table-wrap">
       <table id="txTable">
         <thead><tr>
-          <th>日期</th><th>基金</th><th>股數</th><th>單位價</th><th>佣金/回贈</th>
+          <th>日期</th><th>基金</th><th>類型</th><th>股數</th><th>單位價</th><th>佣金/回贈</th>
           <th>金額</th><th>累積股數</th><th>累積成本</th><th>市值</th><th>損益</th><th>損益%</th><th></th>
         </tr></thead>
         <tbody></tbody>
@@ -151,9 +179,14 @@
 <!-- 走勢圖 -->
 <div class="tab-content" id="tab-history">
   <div class="panel">
-    <h3>組合走勢</h3>
+    <h3>組合走勢（市值 vs 累積成本）</h3>
     <div class="chart-wrap"><canvas id="totalChart"></canvas></div>
     <div class="note" id="xirrNote"></div>
+    <div class="note">
+      ⓘ 2024/08 期間，4隻基金一度短暫全數轉去一隻呢個 app 冇追蹤嘅「conservative fund」再轉返嚟（5日內來回），
+      如果照原始數據畫圖，會見到市值短暫跌到接近 0 嘅失實凹陷。因為呢個轉換純粹係暫存，冇實質蝕錢，
+      已經將呢兩筆 round-trip 交易移除（視為冇轉過），令線條反映真實持倉走勢。
+    </div>
   </div>
 </div>
 
@@ -185,18 +218,23 @@
 
 <script>
 /* ========================================================
-   原始交易數據（照抄你提供嘅4張表：日期, 股數, 單位價, 佣金）
+   內建預設交易數據（照抄你提供嘅4張表：日期, 股數, 單位價, 佣金）
    佣金負數 = 回贈；金額 = 股數*單位價 + 佣金（用嚟計成本）
-   2024/03 = rebalance 買American；2024/08 一段係短暫走去
-   conservative fund 嘅來回，數據原封不動保留（睇trend可自行忽略）
+
+   ⚠ 已移除：2024/08/10（大額轉出）同 2024/08/15（轉返入）呢兩筆
+   round-trip 交易（4隻基金都有），因為呢段期間錢實際上暫存喺
+   一隻呢個 app 冇追蹤嘅「conservative fund」，如果照抄會令市值圖
+   出現失實嘅斷崖式歸零。已當佢冇發生過（視為一直held住冇轉過）。
+   2024/08/20 嗰筆負佣金（回贈/雜費）保留原封不動，冇影響市值歸零問題。
+   2024/03/06 嗰次 rebalance（American 由0變10854，其他三隻各扣走
+   一部分）保留原數據 —— 因為屬同日內部轉換，總市值連續，唔會造成dip。
    ======================================================== */
-const RAW = {
+const DEFAULT_RAW = {
   American: { name:"American 美國股票基金", color:"#e74c3c", rows:[
     ["06/03/2024",10854.363,11.03,0],["15/03/2024",66.312,11.31,0],
     ["30/03/2024",66.195,11.33,0],["30/04/2024",2.099,10.92,-22.92],
     ["30/05/2024",65.348,11.48,0],["30/06/2024",62.766,11.95,0],
     ["30/07/2024",60.709,12.35,0],["05/08/2024",1.902,12.48,-23.74],
-    ["10/08/2024",-11179.694,11.44,0],["15/08/2024",10733.180,12.32,0],
     ["20/08/2024",60.891,12.32,-3234.49],["30/08/2024",0.000,12.32,0],
     ["30/09/2024",62.137,12.07,0],["15/10/2024",59.387,12.63,0],
     ["28/10/2024",2.181,12.72,-27.74],["28/11/2024",58.180,12.89,0],
@@ -225,7 +263,6 @@ const RAW = {
     ["30/03/2024",27.027,27.75,0],["30/04/2024",0.857,26.73,-22.91],
     ["30/05/2024",27.211,27.56,0],["30/06/2024",26.064,28.78,0],
     ["30/07/2024",24.818,30.22,0],["05/08/2024",0.780,30.44,-23.74],
-    ["10/08/2024",-4188.116,28.52,0],["15/08/2024",4422.901,29.89,0],
     ["20/08/2024",25.269,29.68,-3234.49],["30/08/2024",0.000,30.01,0],
     ["30/09/2024",25.633,29.26,0],["15/10/2024",24.550,30.55,0],
     ["28/10/2024",0.915,30.31,-27.73],["28/11/2024",25.646,29.24,0],
@@ -254,7 +291,6 @@ const RAW = {
     ["30/03/2024",20.318,36.91,0],["30/04/2024",0.638,35.87,-22.89],
     ["30/05/2024",20.023,37.46,0],["30/06/2024",19.460,38.54,0],
     ["30/07/2024",18.954,39.57,0],["05/08/2024",0.595,39.88,-23.73],
-    ["10/08/2024",-4453.631,37.20,0],["15/08/2024",3344.140,39.53,0],
     ["20/08/2024",19.036,39.40,-3234.49],["30/08/2024",0.000,39.69,0],
     ["30/09/2024",19.406,38.65,0],["15/10/2024",18.568,40.39,0],
     ["28/10/2024",0.688,40.31,-27.74],["28/11/2024",18.573,40.38,0],
@@ -283,7 +319,6 @@ const RAW = {
     ["30/03/2024",25.810,29.06,0],["30/04/2024",0.815,28.12,-22.92],
     ["30/05/2024",24.962,30.05,0],["30/06/2024",25.005,29.99,0],
     ["30/07/2024",24.667,30.41,0],["05/08/2024",0.773,30.69,-23.73],
-    ["10/08/2024",-3566.026,28.84,0],["15/08/2024",4363.199,30.30,0],
     ["20/08/2024",24.799,30.24,-3234.49],["30/08/2024",0.000,30.56,0],
     ["30/09/2024",25.251,29.70,0],["15/10/2024",23.678,31.68,0],
     ["28/10/2024",0.884,31.37,-27.73],["28/11/2024",24.325,30.83,0],
@@ -303,7 +338,11 @@ const RAW = {
     ["31/07/2026",1.142,39.68,-45.32],["28/08/2026",18.298,40.99,0]
   ]}
 };
-const FUND_KEYS = Object.keys(RAW);
+const FUND_KEYS = ["American","Asia","Global","Growth"];
+
+/* RAW 係「目前生效」嘅資料（可被外部 JSON 覆蓋），
+   DEFAULT_RAW 永遠保留一份唔變，用嚟做「還原內建預設」 */
+let RAW = structuredClone(DEFAULT_RAW);
 
 /* ---------- 工具函式 ---------- */
 function parseDate(s){
@@ -317,7 +356,17 @@ function fmtMoney(n){
 function fmtPct(n){ return (n>=0?'+':'')+n.toFixed(2)+'%'; }
 function cls(n){ return n>=0?'pos':'neg'; }
 
-/* ---------- localStorage 暫存 ---------- */
+/* 交易類型判斷（純粹靠股數大小/正負去估，MPF冇明確type欄位） */
+function txType(units){
+  const a = Math.abs(units);
+  if(a > 200) return units<0 ? '轉換-轉出' : '轉換-轉入';
+  if(a < 1e-6) return '價格更新';
+  if(units < 0) return '提取';
+  return '供款';
+}
+const TX_TYPES = ['供款','轉換-轉入','轉換-轉出','提取','價格更新'];
+
+/* ---------- localStorage：pending 暫存交易 ---------- */
 function loadPending(){ return JSON.parse(localStorage.getItem('mpfPendingTx')||'[]'); }
 function savePending(a){ localStorage.setItem('mpfPendingTx', JSON.stringify(a)); }
 
@@ -343,30 +392,78 @@ function deletePending(id){
 function clearPending(){
   if(confirm('確定清空所有暫存交易？')){ savePending([]); renderAll(); }
 }
-function exportData(){
-  const pending = loadPending();
-  const merged = {};
+
+/* ---------- localStorage：base data（外部 JSON 覆蓋） ---------- */
+function extractRowsSchema(withPending){
+  const obj = {};
   FUND_KEYS.forEach(k=>{
-    merged[k] = RAW[k].rows.concat(
-      pending.filter(p=>p.fund===k).map(p=>[p.date,p.units,p.price,p.commission])
-    );
+    let rows = RAW[k].rows.slice();
+    if(withPending){
+      rows = rows.concat(loadPending().filter(p=>p.fund===k).map(p=>[p.date,p.units,p.price,p.commission]));
+    }
+    obj[k] = { rows };
   });
+  return obj;
+}
+function applyLoadedData(parsed){
+  let applied = 0;
+  FUND_KEYS.forEach(k=>{
+    if(parsed[k] && Array.isArray(parsed[k].rows)){
+      RAW[k].rows = parsed[k].rows;
+      applied++;
+    }
+  });
+  return applied;
+}
+function handleFileLoad(evt){
+  const file = evt.target.files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = e=>{
+    try{
+      const parsed = JSON.parse(e.target.result);
+      const applied = applyLoadedData(parsed);
+      if(applied===0){ alert('呢個 JSON 冇搭到任何已知基金 (American/Asia/Global/Growth)，冇做任何改動。'); return; }
+      localStorage.setItem('mpfBaseDataRows', JSON.stringify(extractRowsSchema(false)));
+      alert('已載入外部 JSON 資料（'+applied+' 隻基金），並已存落呢部電腦。');
+      renderAll();
+    }catch(err){
+      alert('JSON 格式錯誤：'+err.message);
+    }
+  };
+  reader.readAsText(file);
+  evt.target.value = '';
+}
+function restoreDefault(){
+  if(!confirm('確定要還原內建預設數據？呢個動作會清除已載入嘅外部 JSON（暫存交易 pending 唔會受影響）。')) return;
+  RAW = structuredClone(DEFAULT_RAW);
+  localStorage.removeItem('mpfBaseDataRows');
+  renderAll();
+}
+function exportData(){
+  const merged = extractRowsSchema(true);
   const blob = new Blob([JSON.stringify(merged,null,2)],{type:'application/json'});
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href=url; a.download='mpf_data_'+new Date().toISOString().slice(0,10)+'.json';
   a.click(); URL.revokeObjectURL(url);
 }
+/* 開頁時：如果之前載入過外部 JSON，讀返出嚟蓋過內建數據 */
+(function initBaseData(){
+  const saved = localStorage.getItem('mpfBaseDataRows');
+  if(saved){
+    try{ applyLoadedData(JSON.parse(saved)); }
+    catch(e){ console.warn('本機儲存嘅 base data 壞咗，改用內建預設', e); }
+  }
+})();
 
 /* ---------- 核心計算 ---------- */
-// 合併某基金嘅base rows + pending，並依日期排序
 function getMergedRows(key){
   const pending = loadPending().filter(p=>p.fund===key)
     .map(p=>({date:p.date, units:p.units, price:p.price, commission:p.commission||0, isPending:true, id:p.id}));
   const base = RAW[key].rows.map(r=>({date:r[0], units:r[1], price:r[2], commission:r[3]||0, isPending:false, id:null}));
   return base.concat(pending).sort((a,b)=>parseDate(a.date)-parseDate(b.date));
 }
-// 逐行計算累積股數/成本/市值/損益
 function process(rows){
   let cumUnits=0, cumCost=0;
   return rows.map(r=>{
@@ -418,7 +515,6 @@ function fundXirr(hist){
   return xirr(flows);
 }
 function totalXirr(allHist){
-  // 按日期加總所有基金金額（內部轉換會自動抵消）
   const map = {};
   allHist.forEach(h=>{
     const key = h.dateObj.getTime();
@@ -480,7 +576,6 @@ function renderPositions(){
     <td class="${cls(totalPnlPct)}">${fmtPct(totalPnlPct)}</td><td>100%</td>
   </tr>`;
 
-  // summary cards
   const overallXirr = totalXirr(FUND_KEYS.flatMap(k=>getFundHistory(k)));
   document.getElementById('summaryCards').innerHTML = `
     <div class="card"><div class="label">累積供款成本</div><div class="value">${fmtMoney(totalCost)}</div></div>
@@ -490,18 +585,53 @@ function renderPositions(){
   `;
 }
 
-/* ---------- 渲染：供款記錄 ---------- */
+/* ---------- 渲染：供款記錄（+ filter） ---------- */
+let txFilter = {fund:'', type:'', from:'', to:''};
+
+function setupTxFilters(){
+  const fundSel = document.getElementById('txFundFilter');
+  fundSel.innerHTML = '<option value="">全部基金</option>' +
+    FUND_KEYS.map(k=>`<option value="${k}">${RAW[k].name}</option>`).join('');
+  const typeSel = document.getElementById('txTypeFilter');
+  typeSel.innerHTML = '<option value="">全部類型</option>' +
+    TX_TYPES.map(t=>`<option value="${t}">${t}</option>`).join('');
+
+  fundSel.onchange = ()=>{ txFilter.fund = fundSel.value; renderTransactions(); };
+  typeSel.onchange = ()=>{ txFilter.type = typeSel.value; renderTransactions(); };
+  document.getElementById('txFromDate').onchange = e=>{ txFilter.from = e.target.value; renderTransactions(); };
+  document.getElementById('txToDate').onchange   = e=>{ txFilter.to   = e.target.value; renderTransactions(); };
+  document.getElementById('txResetBtn').onclick = ()=>{
+    txFilter = {fund:'', type:'', from:'', to:''};
+    fundSel.value=''; typeSel.value='';
+    document.getElementById('txFromDate').value='';
+    document.getElementById('txToDate').value='';
+    renderTransactions();
+  };
+}
+
 function renderTransactions(){
   const tbody = document.querySelector('#txTable tbody');
   let all = [];
   FUND_KEYS.forEach(k=>{
-    getFundHistory(k).forEach(h=>all.push({...h, fundKey:k}));
+    getFundHistory(k).forEach(h=>all.push({...h, fundKey:k, type:txType(h.units)}));
   });
   all.sort((a,b)=>b.dateObj-a.dateObj);
-  tbody.innerHTML = all.map(r=>`
+
+  const filtered = all.filter(r=>{
+    if(txFilter.fund && r.fundKey!==txFilter.fund) return false;
+    if(txFilter.type && r.type!==txFilter.type) return false;
+    if(txFilter.from && r.dateObj < parseDate(txFilter.from)) return false;
+    if(txFilter.to   && r.dateObj > parseDate(txFilter.to))   return false;
+    return true;
+  });
+
+  document.getElementById('txCountHint').textContent = `顯示 ${filtered.length} / 共 ${all.length} 筆`;
+
+  tbody.innerHTML = filtered.map(r=>`
     <tr class="${r.isPending?'pending-row':''}">
       <td>${r.date}${r.isPending?' 🕒':''}</td>
       <td><span class="fund-tag tag-${r.fundKey}">${r.fundKey}</span></td>
+      <td>${r.type}</td>
       <td>${r.units.toFixed(3)}</td>
       <td>${fmtMoney(r.price)}</td>
       <td class="${r.commission<0?'pos':''}">${fmtMoney(r.commission)}</td>
@@ -629,6 +759,7 @@ function renderAll(){
   renderHistoryChart();
   renderDetail();
 }
+setupTxFilters();
 renderAll();
 </script>
 </body>
