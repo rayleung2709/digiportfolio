@@ -386,7 +386,15 @@ const lastValidIRR=rows=>{
 
 /* ── 處理原始DATA ── */
 const toRows=arr=>arr.map(([d,cost,mv])=>({d,cost,mv,pl:mv-cost}));
-const invescoRows=runningXIRR(toRows(DATA.invesco));
+// Invesco專用：由「單次金額」累加做cost
+function toRowsFromFlows(arr){
+  let cost=0;
+  return arr.map(([d,amt,mv])=>{
+    cost+=amt;
+    return {d,cost,mv,pl:mv-cost};
+  });
+}
+const invescoRows = runningXIRR(toRowsFromFlows(DATA.invesco));
 
 const fundNames=Object.keys(DATA.fidelity);
 const fundRows={};
