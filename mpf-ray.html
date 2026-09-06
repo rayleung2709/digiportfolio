@@ -3,42 +3,289 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>MPF · Ray</title>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" integrity="sha384-9nhczxUqK87bcKHh20fSQcTGD4qq5GhayNYSYWqwBkINBhOfQLg/P5HG5lF1urn4" crossorigin="anonymous"></script>
-<script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js" integrity="sha384-Cs3dgUx6+jDxxuqHvVH8Onpyj2LF1gKZurLDlhqzuJmUqVYMJ0THTWpxK5Z086Zm" crossorigin="anonymous"></script>
-<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js" integrity="sha384-zPzbVRXfR492Sd5D+HydTYCxxgHAfgVO8KERbLlpeH5unsmbAEXrscGUUqLZG9BM" crossorigin="anonymous"></script>
-<link rel="stylesheet" href="fund.css">
+<title>我的投資組合</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+:root{--g:#0a7d3b;--r:#c0392b;--bg:#f6f7f9;--card:#fff;--mute:#666}
+*{box-sizing:border-box}
+body{margin:0;font-family:-apple-system,system-ui,sans-serif;background:var(--bg);color:#222;font-size:14px}
+header{padding:16px;background:var(--card);border-bottom:1px solid #e3e3e3}
+h1{margin:0 0 4px;font-size:18px}
+.sub{color:var(--mute);font-size:12px}
+.note{background:#fff6dc;border:1px dashed #d8b34c;border-radius:8px;padding:10px 12px;margin:12px 16px;font-size:12px;color:#7a5b12}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;padding:12px 16px}
+.kpi{background:var(--card);border-radius:10px;padding:10px 12px;border:1px solid #eee}
+.kpi .l{font-size:11px;color:var(--mute)}.kpi .v{font-size:17px;font-weight:600;margin-top:2px}
+.pos{color:var(--g)}.neg{color:var(--r)}
+nav{display:flex;gap:6px;padding:0 16px;flex-wrap:wrap}
+nav button{flex:1;min-width:110px;padding:12px;min-height:40px;border:0;border-radius:8px 8px 0 0;background:#e6e8ec;font-size:13px}
+nav button.on{background:var(--card);font-weight:600}
+section{display:none;background:var(--card);margin:0 16px 16px;padding:12px;border-radius:0 0 10px 10px}
+section.on{display:block}
+.wrap{overflow-x:auto;max-height:480px}
+table{border-collapse:collapse;width:100%;white-space:nowrap}
+th,td{padding:6px 8px;text-align:right;border-bottom:1px solid #eee}
+th:first-child,td:first-child{text-align:left}
+th{font-size:11px;color:var(--mute);font-weight:500;position:sticky;top:0;background:var(--card)}
+tfoot td{font-weight:600}
+canvas{max-height:300px;margin-bottom:12px}
+.bar{display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap}
+.bar select{padding:6px 10px;border-radius:6px;border:1px solid #ccc;font-size:13px}
+@media (prefers-color-scheme:dark){
+  :root{--bg:#111315;--card:#1b1d20;--mute:#9aa0a6}
+  body{color:#e8e8e8}
+  header{border-color:#2a2d30}
+  th,td{border-color:#2a2d30}
+  .kpi{border-color:#2a2d30}
+  nav button{background:#24262a}
+  .bar select{background:#1b1d20;color:#e8e8e8;border-color:#3a3d42}
+  .note{background:#2a2410;color:#e8d9a0;border-color:#6b5320}
+}
+</style>
 </head>
-<body data-file="data/mpf-ray.json">
+<body>
 <header>
-  <div class="hrow"><h1 id="title">…</h1></div>
-  <div class="sub loading" id="upd">載入中…</div>
-  <nav class="pagenav">
-    <a href="index.html">DigiPortfolio</a>
-    <a href="mpf-ray.html" class="on">MPF Ray</a>
-    <a href="mpf-sherina.html">MPF Sherina</a>
-    <a href="pf-sherina.html">PF Sherina</a>
-  </nav>
+  <h1>我的投資組合（HKD）</h1>
+  <div class="sub">2011中 - 2023中：Invesco（合併） ｜ 2023中 - 而家：Fidelity（分基金 + 合併）｜ 所有金額 HK$</div>
 </header>
+<div class="note">⚠️ 入面數字係示範用，記得跟住下面「點樣填數」步驟，去改 <code>DATA</code> 個object，貼返你Excel嘅真實數字。XIRR會自動計，你唔需要理點計。</div>
 <div class="kpis" id="kpis"></div>
 <nav role="tablist">
-  <button data-t="hold" class="on" role="tab" aria-selected="true">持倉</button>
-  <button data-t="hist" role="tab" aria-selected="false">歷史</button>
-  <button data-t="tx" role="tab" aria-selected="false">交易</button>
-  <button data-t="fund" role="tab" aria-selected="false">基金</button>
+  <button data-t="overview" class="on">總覽</button>
+  <button data-t="invesco">Invesco 2011-2023</button>
+  <button data-t="fundsplit">Fidelity 分基金</button>
+  <button data-t="fidoverall">Fidelity 合併</button>
 </nav>
-<section id="hold" class="on" role="tabpanel" aria-hidden="false"><div class="wrap" id="holdT"></div></section>
-<section id="hist" role="tabpanel" aria-hidden="true">
-  <div class="bar" id="histBar"><span class="hint">滾輪／兩指縮放，拖曳平移</span></div>
-  <canvas id="chart"></canvas><div class="wrap" id="histT"></div>
+
+<section id="overview" class="on">
+  <canvas id="chartOverview"></canvas>
+  <div class="sub">紅／綠色區域＝損益。Invesco賣清後歸零，接返Fidelity。呢條線嘅XIRR只作參考（見底部說明）。</div>
+  <div class="wrap" id="tblOverview"></div>
 </section>
-<section id="tx" role="tabpanel" aria-hidden="true"><div class="wrap" id="txT"></div></section>
-<section id="fund" role="tabpanel" aria-hidden="true">
-  <div class="bar" id="fundBar"><select id="fundSel"></select><span class="hint">圖例撳一下可隱藏該線</span></div>
-  <canvas id="fundChart"></canvas>
-  <div class="kpis" id="fundKpi" style="padding:0 0 10px"></div>
-  <div class="wrap" id="fundT"></div>
+
+<section id="invesco">
+  <canvas id="chartInvesco"></canvas>
+  <div class="wrap" id="tblInvesco"></div>
 </section>
-<script src="fund.js"></script>
+
+<section id="fundsplit">
+  <div class="bar"><select id="fundSel"></select></div>
+  <canvas id="chartFund"></canvas>
+  <div class="wrap" id="tblFund"></div>
+</section>
+
+<section id="fidoverall">
+  <canvas id="chartFidOverall"></canvas>
+  <div class="wrap" id="tblFidOverall"></div>
+</section>
+
+<script>
+'use strict';
+
+/* ============================================================
+   ↓↓↓ 呢個 DATA 就係你要填嘅真實數字 ↓↓↓
+   格式全部統一：[日期, 累積成本, 當時市值]
+   - 日期：'YYYY-MM-DD'
+   - 累積成本：即係你總共供咗幾多錢入去（同你Excel嗰欄一樣）
+   - 市值：嗰個時間點戶口值幾多錢
+   - 損益、%、XIRR 全部唔需要你計，程式自動幫你計
+   ============================================================ */
+const DATA = {
+
+  // ── 2011中 - 2023中：Invesco，合併做一條線 ──
+  invesco: [
+    ['2011-09-12', 1999.94, 1999.94],
+    ['2011-10-11', 3999.87, 3923.00],
+    ['2011-11-11', 5999.82, 6076.65],
+    // ...你舊Excel嗰175行，貼呢種格式落嚙就得...
+    ['2023-07-01', 240000.00, 251320.00],  // 賣清前一刻嘅市值（好緊要，等XIRR計得啱）
+    ['2023-08-01', 240000.00, 0],          // 賣清咗，市值歸零
+  ],
+
+  // ── 2023中 - 而家：Fidelity，分開四隻基金 ──
+  fidelity: {
+    AsiaPacific: [
+      ['2023-08-15', 128000, 128000],
+      ['2024-03-06', 128000, 138380],
+      // ...
+    ],
+    Global: [
+      ['2023-08-15', 170000, 170000],
+      // ...
+    ],
+    Growth: [
+      ['2023-08-15', 128000, 128000],
+      // ...
+    ],
+    Americas: [
+      ['2024-03-06', 120000, 120000],
+      // ...
+    ],
+  }
+};
+/* ============================================================
+   ↑↑↑ 改完呢部分，save咗個HTML file再開，就自動更新晒 ↑↑↑
+   ============================================================ */
+
+const $=s=>document.querySelector(s);
+const fmt=(n,d=0)=>(n==null||!isFinite(n))?'–':'HK$'+n.toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});
+const pct=n=>n==null||!isFinite(n)?'–':(n*100).toFixed(1)+'%';
+const cls=n=>n>0?'pos':n<0?'neg':'';
+
+document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('nav button').forEach(x=>x.classList.toggle('on',x===b));
+  document.querySelectorAll('section').forEach(s=>s.classList.toggle('on',s.id===b.dataset.t));
+});
+
+/* ── XIRR 計算（Newton-Raphson，同大公司嗰套一樣邏輯） ── */
+const YEAR_MS=31557600000, DAY_MS=86400000, MIN_AGE_DAYS=25;
+function xirr(flows){
+  if(flows.length<2)return null;
+  const t0=new Date(flows[0].d), yr=f=>(new Date(f.d)-t0)/YEAR_MS;
+  let r=0.1;
+  for(let i=0;i<200;i++){
+    let f=0,df=0;
+    for(const c of flows){const t=yr(c),b=Math.pow(1+r,t);f+=c.v/b;df-=t*c.v/(b*(1+r));}
+    if(Math.abs(df)<1e-12)return null;
+    const nr=r-f/df;
+    if(!isFinite(nr)||nr<-0.99)return null;
+    if(Math.abs(nr-r)<1e-8)return nr;
+    r=nr;
+  }
+  return null;
+}
+// 用「成本變化」嚟推斷你出咗幾多錢（增加=出錢=負數現金流）
+function costFlows(rows,uptoIdx){
+  const flows=[];let prev=0;
+  for(let i=0;i<=uptoIdx;i++){
+    const delta=rows[i].cost-prev;
+    if(Math.abs(delta)>0.01)flows.push({d:rows[i].d,v:-delta});
+    prev=rows[i].cost;
+  }
+  return flows;
+}
+// 幫每一行計「截至嗰個月」嘅年化XIRR
+function runningXIRR(rows){
+  if(!rows.length)return rows;
+  const t0=new Date(rows[0].d);
+  return rows.map((r,i)=>{
+    const age=(new Date(r.d)-t0)/DAY_MS;
+    if(age<MIN_AGE_DAYS||r.mv<=0)return {...r,irr:null};
+    const flows=[...costFlows(rows,i),{d:r.d,v:r.mv}];
+    return {...r,irr:xirr(flows)};
+  });
+}
+// 攞最後一個「有效」嘅XIRR（就算戶口賣清咗，都攞返賣清之前嗰個做終身回報）
+const lastValidIRR=rows=>{
+  for(let i=rows.length-1;i>=0;i--)if(rows[i].irr!=null)return rows[i].irr;
+  return null;
+};
+
+/* ── 處理原始DATA ── */
+const toRows=arr=>arr.map(([d,cost,mv])=>({d,cost,mv,pl:mv-cost}));
+const invescoRows=runningXIRR(toRows(DATA.invesco));
+
+const fundNames=Object.keys(DATA.fidelity);
+const fundRows={};
+fundNames.forEach(f=>fundRows[f]=runningXIRR(toRows(DATA.fidelity[f])));
+
+// 合併四隻基金做 Fidelity 總計
+function buildOverall(fundsObj){
+  const dateSet=new Set();
+  Object.values(fundsObj).forEach(rows=>rows.forEach(r=>dateSet.add(r.d)));
+  const dates=[...dateSet].sort();
+  const state={};fundNames.forEach(f=>state[f]={cost:0,mv:0});
+  const idx={};fundNames.forEach(f=>idx[f]=0);
+  const out=[];
+  for(const d of dates){
+    for(const f of fundNames){
+      const rows=fundsObj[f];
+      while(idx[f]<rows.length&&rows[idx[f]].d<=d){
+        state[f]={cost:rows[idx[f]].cost,mv:rows[idx[f]].mv};
+        idx[f]++;
+      }
+    }
+    let cost=0,mv=0;
+    fundNames.forEach(f=>{cost+=state[f].cost;mv+=state[f].mv;});
+    out.push({d,cost,mv,pl:mv-cost});
+  }
+  return out;
+}
+const fidOverallRows=runningXIRR(buildOverall(fundRows));
+
+// 總覽：Invesco接住Fidelity合併，做一條長線
+// 注意：呢條線嘅XIRR假設Invesco賣清果筆錢冇再投入Fidelity（純粹兩個獨立戶口相連），
+// 如果實際上Invesco賣咗嘅錢係搬咗去開Fidelity，呢個XIRR會略為失真，
+// 純粹供參考，各自產品自己嗰個XIRR（Invesco tab / Fidelity合併 tab）先係最準。
+const overviewRaw=[...invescoRows.map(r=>({d:r.d,cost:r.cost,mv:r.mv,pl:r.pl})),
+                   ...fidOverallRows.map(r=>({d:r.d,cost:r.cost,mv:r.mv,pl:r.pl}))];
+const overviewRows=runningXIRR(overviewRaw);
+
+/* ── KPI ── */
+function renderKpis(){
+  const latest=fidOverallRows[fidOverallRows.length-1]||{cost:0,mv:0,pl:0};
+  const fidIRR=lastValidIRR(fidOverallRows);
+  const invescoFinal=invescoRows[invescoRows.length-1]||{cost:0,mv:0,pl:0};
+  const invescoIRR=lastValidIRR(invescoRows);
+  const overallIRR=lastValidIRR(overviewRows);
+  $('#kpis').innerHTML=[
+    ['而家總成本',fmt(latest.cost)],
+    ['而家總市值',fmt(latest.mv)],
+    ['而家損益',`<span class="${cls(latest.pl)}">${fmt(latest.pl)} (${pct(latest.cost?latest.pl/latest.cost:null)})</span>`],
+    ['Fidelity XIRR',`<span class="${cls(fidIRR)}">${pct(fidIRR)}</span>`],
+    ['Invesco 終身XIRR',`<span class="${cls(invescoIRR)}">${pct(invescoIRR)}</span>`],
+    ['全期XIRR(參考)',`<span class="${cls(overallIRR)}">${pct(overallIRR)}</span>`],
+  ].map(([l,v])=>`<div class="kpi"><div class="l">${l}</div><div class="v">${v}</div></div>`).join('');
+}
+
+/* ── 畫圖／畫表 ── */
+const charts={};
+function baseOpt(){
+  return {animation:false,interaction:{mode:'index',intersect:false},
+    plugins:{legend:{position:'bottom'}},
+    scales:{x:{ticks:{maxTicksLimit:8}},y:{ticks:{callback:v=>(v/1000).toFixed(0)+'k'}}}};
+}
+function drawLineChart(canvasId,key,rows){
+  charts[key]?.destroy();
+  const o=baseOpt();
+  o.scales.y1={position:'right',grid:{drawOnChartArea:false},
+    ticks:{callback:v=>(v/1000).toFixed(0)+'k'},title:{display:true,text:'損益',font:{size:10}}};
+  charts[key]=new Chart($(canvasId),{type:'line',data:{labels:rows.map(r=>r.d),datasets:[
+    {label:'市值',data:rows.map(r=>r.mv),borderColor:'#0a7d3b',pointRadius:0,tension:.2,yAxisID:'y'},
+    {label:'成本',data:rows.map(r=>r.cost),borderColor:'#999',borderDash:[4,4],pointRadius:0,stepped:true,yAxisID:'y'},
+    {label:'損益',data:rows.map(r=>r.pl),pointRadius:0,tension:.2,borderWidth:1.5,yAxisID:'y1',
+      segment:{borderColor:c=>c.p1.parsed.y>=0?'#0a7d3b':'#c0392b'},borderColor:'#0a7d3b',
+      fill:{target:'origin',above:'rgba(10,125,59,.10)',below:'rgba(192,57,43,.10)'}}
+  ]},options:o});
+}
+function drawTable(elId,rows){
+  const body=[...rows].reverse().map(r=>`<tr><td>${r.d}</td><td>${fmt(r.cost)}</td><td>${fmt(r.mv)}</td>
+    <td class="${cls(r.pl)}">${fmt(r.pl)}</td><td class="${cls(r.pl)}">${pct(r.cost?r.pl/r.cost:null)}</td>
+    <td class="${cls(r.irr)}">${pct(r.irr)}</td></tr>`).join('');
+  $(elId).innerHTML=`<table><thead><tr><th>日期</th><th>成本</th><th>市值</th><th>損益</th><th>%</th><th>XIRR</th></tr></thead>
+    <tbody>${body}</tbody></table>`;
+}
+
+const fundSel=$('#fundSel');
+fundSel.innerHTML=fundNames.map(f=>`<option value="${f}">${f}</option>`).join('');
+fundSel.onchange=()=>drawFund(fundSel.value);
+function drawFund(name){
+  const rows=fundRows[name];
+  drawLineChart('#chartFund','fund',rows);
+  drawTable('#tblFund',rows);
+}
+
+function renderAll(){
+  renderKpis();
+  drawLineChart('#chartOverview','overview',overviewRows);
+  drawTable('#tblOverview',overviewRows);
+  drawLineChart('#chartInvesco','invesco',invescoRows);
+  drawTable('#tblInvesco',invescoRows);
+  drawFund(fundNames[0]);
+  drawLineChart('#chartFidOverall','fidoverall',fidOverallRows);
+  drawTable('#tblFidOverall',fidOverallRows);
+}
+renderAll();
+</script>
 </body>
 </html>
