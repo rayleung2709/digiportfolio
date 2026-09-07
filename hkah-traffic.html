@@ -149,6 +149,8 @@
     align-items: center;
   }
   .eta-line:last-child { border-bottom: none; }
+
+  /* 一般（非最近）班次：淨係顯示分鐘，唔跳動 */
   .eta-min {
     font-weight: bold;
     color: #0a58ca;
@@ -157,11 +159,40 @@
     text-align: right;
   }
   .eta-min.warn{ color:#e07b00; }
-  .eta-min.soon{ color:#c00042; animation: pulse 1s infinite; }
+  .eta-min.soon{ color:#c00042; }
+
+  /* 最近一班：突出顯示 + 每秒倒數 */
+  .eta-line.primary{
+    padding: 8px 0;
+  }
+  .eta-line.primary .eta-min{
+    font-size: 18px;
+    min-width: 84px;
+  }
+  .eta-line.primary .eta-min.soon{
+    animation: pulse 1s infinite;
+  }
+  .live-dot{
+    display:inline-block;
+    width:6px;
+    height:6px;
+    border-radius:50%;
+    background:#0a58ca;
+    margin-right:5px;
+    animation: blink 1.4s infinite;
+  }
+  .eta-min.soon ~ .live-dot,
+  .primary .eta-min.soon + .live-dot { background:#c00042; }
+
   @keyframes pulse{
     0%,100%{ opacity:1; }
-    50%{ opacity:.5; }
+    50%{ opacity:.55; }
   }
+  @keyframes blink{
+    0%,100%{ opacity:1; }
+    50%{ opacity:.3; }
+  }
+
   .loading { color: #aaa; font-size: 13px; }
   .error { color: #c00; font-size: 13px; }
   .stale-warning{
@@ -209,13 +240,6 @@ const MTR_CONFIG = [
     dirs: [ {key:"UP", label:"往柴灣"}, {key:"DOWN", label:"往堅尼地城"} ] },
 ];
 
-/*
-  GMB_CONFIG 說明：
-  - region / route: 路線資料
-  - stopMatch: 用嚟喺站名裡面 search 嘅關鍵字（用 name_tc.includes()）
-  - occurrence: 如果同一個關鍵字喺條線出現多次（例如循環線起訖站相同），
-                用呢個決定攞第幾個 match（1 = 第一個，2 = 第二個...）
-*/
 const GMB_CONFIG = [
   { title: "港島 GMB 26 — 香港港安醫院站", region: "HKI", route: "26", stopMatch: "港安醫院", occurrence: 1 },
   { title: "港島 GMB 26 — 利園山道 鳳鳴大廈外", region: "HKI", route: "26", stopMatch: "鳳鳴大廈", occurrence: 1 },
@@ -237,19 +261,27 @@ function fmtTime(t) {
   return d.toTimeString().slice(0,5);
 }
 
-// 距離 ETA 仲有幾多「秒」（唔再係分鐘），用嚟每秒重新計算倒數
 function secsLeft(t) {
   if (!t) return null;
   const diff = Math.round((new Date(t).getTime() - Date.now()) / 1000);
   return diff < 0 ? 0 : diff;
 }
 
+// 最近一班：mm分ss秒 倒數文字
 function countdownText(sec) {
   if (sec === null) return "--";
   if (sec <= 0) return "即將到站";
   const m = Math.floor(sec / 60);
   const s = sec % 60;
   return m > 0 ? `${m}分${String(s).padStart(2,"0")}秒` : `${s}秒`;
+}
+
+// 其他班次：淨係顯示「X 分鐘」，唔顯示秒
+function minutesText(sec) {
+  if (sec === null) return "--";
+  if (sec <= 0) return "即將到站";
+  const m = Math.ceil(sec / 60);
+  return `${m} 分鐘`;
 }
 
 function urgencyClass(sec) {
@@ -259,9 +291,16 @@ function urgencyClass(sec) {
   return "";
 }
 
-function etaLineHTML(label, sec) {
+/*
+  isPrimary = true  → 呢個係最近一班，每秒倒數 (mm分ss秒) + live dot
+  isPrimary = false → 只顯示分鐘數，唔跳動
+*/
+function etaLineHTML(label, sec, isPrimary) {
   const cls = urgencyClass(sec);
-  return `<div class="eta-line"><span>${label}</span><span class="eta-min ${cls}">${countdownText(sec)}</span></div>`;
+  const rowClass = isPrimary ? "eta-line primary" : "eta-line";
+  const dot = isPrimary ? `<span class="live-dot"></span>` : "";
+  const text = isPrimary ? countdownText(sec) : minutesText(sec);
+  return `<div class="${rowClass}"><span>${dot}${label}</span><span class="eta-min ${cls}">${text}</span></div>`;
 }
 
 function makeCard(id, title, tagClass, tagText, sub, dataType) {
@@ -278,9 +317,9 @@ function makeCard(id, title, tagClass, tagText, sub, dataType) {
   return div;
 }
 
-/* ========== 數據層：只存絕對時間，唔存「已計好嘅分鐘數」 ========== */
+/* ========== 數據層：只存絕對時間 ========== */
 
-const state = {}; // cardId -> { type, data, error, lastUpdated }
+const state = {};
 
 function setCardData(cardId, type, data) {
   state[cardId] = { type, data, error: null, lastUpdated: new Date() };
@@ -293,7 +332,7 @@ function setCardError(cardId, msg) {
   renderCard(cardId);
 }
 
-/* ========== 畫面層：每次 render 都用「而家」嘅時間去計倒數 ========== */
+/* ========== 畫面層 ========== */
 
 function renderCard(cardId) {
   const s = state[cardId];
@@ -325,6 +364,7 @@ function renderCard(cardId) {
   updatedEl.textContent = "更新於 " + s.lastUpdated.toTimeString().slice(0,8);
 }
 
+// 每個方向自己嘅第一班先係 primary（有秒倒數）
 function renderMTR(data) {
   let html = "";
   data.dirs.forEach(d => {
@@ -332,9 +372,9 @@ function renderMTR(data) {
     if (d.items.length === 0) {
       html += `<div class="eta-line"><span>暫無班次</span></div>`;
     } else {
-      d.items.forEach(item => {
+      d.items.forEach((item, idx) => {
         const sec = secsLeft(item.time);
-        html += etaLineHTML(`${fmtTime(item.time)} (${item.plat}號月台)`, sec);
+        html += etaLineHTML(`${fmtTime(item.time)} (${item.plat}號月台)`, sec, idx === 0);
       });
     }
     html += `</div>`;
@@ -345,10 +385,10 @@ function renderMTR(data) {
 function renderCTB(data) {
   if (data.items.length === 0) return `<div class="eta-line"><span>暫無班次</span></div>`;
   let html = "";
-  data.items.forEach(t => {
+  data.items.forEach((t, idx) => {
     const sec = secsLeft(t.eta);
     const dirLabel = t.dir === "I" ? "回程" : "去程";
-    html += etaLineHTML(`${dirLabel} → ${t.dest || ""}`, sec);
+    html += etaLineHTML(`${dirLabel} → ${t.dest || ""}`, sec, idx === 0);
   });
   return html;
 }
@@ -358,15 +398,15 @@ function renderGMB(data) {
   if (data.items.length === 0) {
     html += `<div class="eta-line"><span>暫無班次</span></div>`;
   } else {
-    data.items.forEach(t => {
+    data.items.forEach((t, idx) => {
       const sec = secsLeft(t.eta);
-      html += etaLineHTML(fmtTime(t.eta), sec);
+      html += etaLineHTML(fmtTime(t.eta), sec, idx === 0);
     });
   }
   return html;
 }
 
-/* ========== MTR fetch（只存原始時間） ========== */
+/* ========== MTR fetch ========== */
 
 async function loadMTR(cfg, cardId) {
   try {
@@ -514,7 +554,7 @@ function renderAllCards() {
   Object.keys(state).forEach(renderCard);
 }
 
-/* ========== Master clock：單一個 timer 同時處理「每秒倒數」+「每30秒 fetch」 ========== */
+/* ========== Master clock ========== */
 
 const REFRESH_SECONDS = 30;
 let tickCount = 0;
@@ -528,11 +568,11 @@ function updateRefreshIndicator(remaining) {
 
 function masterTick() {
   tickCount++;
-  renderAllCards(); // 每秒重新計算倒數，唔會叫 API
+  renderAllCards();
   const remaining = REFRESH_SECONDS - (tickCount % REFRESH_SECONDS);
   updateRefreshIndicator(remaining);
   if (tickCount % REFRESH_SECONDS === 0) {
-    fetchAll(); // 每30秒先真正叫 API
+    fetchAll();
   }
 }
 
@@ -551,7 +591,7 @@ document.querySelectorAll(".tab").forEach(btn => {
 
 /* ========== 啟動 ========== */
 
-fetchAll(); // 一開始即刻攞一次
+fetchAll();
 updateRefreshIndicator(REFRESH_SECONDS);
 setInterval(masterTick, 1000);
 </script>
