@@ -120,13 +120,10 @@ const MTR_CONFIG = [
   - stopMatch: 用嚟喺站名裡面 search 嘅關鍵字（用 name_tc.includes()）
   - occurrence: 如果同一個關鍵字喺條線出現多次（例如循環線起訖站相同），
                 用呢個決定攞第幾個 match（1 = 第一個，2 = 第二個...）
-  - routeSeqFilter: (optional) 如果想指定用邊個 direction/route_seq，可以填數字，
-                     唔填就會自動搵哂全部 direction
 */
 const GMB_CONFIG = [
   { title: "港島 GMB 26 — 香港港安醫院站", region: "HKI", route: "26", stopMatch: "港安醫院", occurrence: 1 },
-  { title: "港島 GMB 26 — 利園山道 鳳鳴大廈外 (起點)", region: "HKI", route: "26", stopMatch: "鳳鳴大廈", occurrence: 1 },
-  { title: "港島 GMB 26 — 利園山道 鳳鳴大廈外 (終點)", region: "HKI", route: "26", stopMatch: "鳳鳴大廈", occurrence: 2 },
+  { title: "港島 GMB 26 — 利園山道 鳳鳴大廈外", region: "HKI", route: "26", stopMatch: "鳳鳴大廈", occurrence: 1 },
 ];
 
 const CTB_CONFIG = [
@@ -239,19 +236,10 @@ async function loadCTB(cfg, cardId) {
   }
 }
 
-/* ========== GMB（已修正版） ========== */
-/*
-  修正要點：
-  1. route-stop 回應嘅站陣列喺 data.route_stops，唔係 data 本身
-  2. 站名已經包含喺 route-stop 回應入面 (name_tc/name_sc/name_en)，
-     完全唔需要再逐個 call /stop/{stop_id} — 嗰個 endpoint 得返座標，冇名
-  3. ETA endpoint 必須帶 route_seq: /eta/route-stop/{route_id}/{route_seq}/{stop_seq}
-  4. 用 occurrence 處理同名站（例如循環線起訖站名相同）
-*/
+/* ========== GMB ========== */
 
-// cache: 避免重複 call route / route-stop（同一個 route 可能有多個 config 用到）
-const gmbRouteCache = {};   // key: "region-route" → routeJson.data (array)
-const gmbStopCache = {};    // key: "routeId-routeSeq" → route_stops array
+const gmbRouteCache = {};
+const gmbStopCache = {};
 
 async function fetchGmbRoute(region, route) {
   const key = `${region}-${route}`;
@@ -269,7 +257,6 @@ async function fetchGmbRouteStops(routeId, routeSeq) {
   if (gmbStopCache[key]) return gmbStopCache[key];
   const res = await fetch(`https://data.etagmb.gov.hk/route-stop/${routeId}/${routeSeq}`);
   const json = await res.json();
-  // ⭐ 關鍵修正：站陣列喺 data.route_stops
   const stops = (json.data && json.data.route_stops) ? json.data.route_stops : [];
   gmbStopCache[key] = stops;
   return stops;
@@ -295,7 +282,7 @@ async function loadGMB(cfg, cardId) {
     }
     debug.push(`Step1 OK: 搵到 ${routeList.length} 個route項目`);
 
-    let matches = []; // 儲存所有符合 stopMatch 嘅站, 跨所有 direction
+    let matches = [];
 
     for (const r of routeList) {
       const routeId = r.route_id;
@@ -322,7 +309,6 @@ async function loadGMB(cfg, cardId) {
     }
 
     if (matches.length === 0) {
-      // 印出全部站名幫手 debug
       let allNames = [];
       for (const r of routeList) {
         for (const dirInfo of (r.directions || [])) {
@@ -341,7 +327,6 @@ async function loadGMB(cfg, cardId) {
     const found = matches[occIdx] || matches[0];
     debug.push(`使用第${occIdx+1}個match: stop_seq=${found.stop_seq}, name=${found.name}`);
 
-    // ⭐ ETA 要帶 route_seq
     const etaUrl = `https://data.etagmb.gov.hk/eta/route-stop/${found.route_id}/${found.route_seq}/${found.stop_seq}`;
     const etaRes = await fetch(etaUrl);
     const etaJson = await etaRes.json();
