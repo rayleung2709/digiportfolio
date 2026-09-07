@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>我的交通ETA</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: "Noto Sans HK", "PingFang HK", "Microsoft JhengHei", sans-serif;
+    background: #f2f4f7;
+    margin: 0;
+    padding: 16px;
+    color: #222;
+  }
+  h1 {
+    font-size: 20px;
+    margin: 0 0 16px;
+    text-align: center;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 14px;
+    max-width: 1100px;
+    margin: 0 auto;
+  }
+  .card {
+    background: #fff;
+    border-radius: 12px;
+    padding: 14px 16px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+  }
+  .card h2 {
+    font-size: 16px;
+    margin: 0 0 4px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .tag {
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    color: #fff;
+    font-weight: bold;
+  }
+  .tag.mtr { background: #b00042; }
+  .tag.gmb { background: #1a7a3c; }
+  .tag.ctb { background: #ffab00; color:#222; }
+  .sub {
+    font-size: 12px;
+    color: #777;
+    margin-bottom: 8px;
+  }
+  .dir-block {
+    margin-bottom: 8px;
+  }
+  .dir-title {
+    font-size: 12px;
+    font-weight: bold;
+    color: #555;
+    margin-bottom: 2px;
+  }
+  .eta-line {
+    font-size: 14px;
+    padding: 3px 0;
+    border-bottom: 1px dashed #eee;
+    display: flex;
+    justify-content: space-between;
+  }
+  .eta-line:last-child { border-bottom: none; }
+  .eta-min {
+    font-weight: bold;
+    color: #0a58ca;
+  }
+  .loading { color: #aaa; font-size: 13px; }
+  .error { color: #c00; font-size: 13px; }
+  .updated {
+    font-size: 10px;
+    color: #999;
+    text-align: right;
+    margin-top: 4px;
+  }
+</style>
+</head>
+<body>
+
+<h1>🚉 我的交通 ETA</h1>
+<div class="grid" id="grid"></div>
+
+<script>
+/* ========== 設定區：你要嘅站同線 ========== */
+
+const MTR_CONFIG = [
+  { title: "鑽石山 — 屯馬線", line: "TML", sta: "DIH",
+    dirs: [ {key:"UP", label:"往屯門"}, {key:"DOWN", label:"往烏溪沙"} ] },
+  { title: "鑽石山 — 觀塘線", line: "KTL", sta: "DIH",
+    dirs: [ {key:"UP", label:"往調景嶺"}, {key:"DOWN", label:"往黃埔"} ] },
+  { title: "鰂魚涌 — 港島線", line: "ISL", sta: "QUB",
+    dirs: [ {key:"UP", label:"往柴灣"}, {key:"DOWN", label:"往堅尼地城"} ] },
+  { title: "銅鑼灣 — 港島線", line: "ISL", sta: "CAB",
+    dirs: [ {key:"UP", label:"往柴灣"}, {key:"DOWN", label:"往堅尼地城"} ] },
+];
+
+const GMB_CONFIG = [
+  { title: "港島 GMB 26 — 香港港安醫院站", region: "HKI", route: "26", stopMatch: "港安醫院" },
+  { title: "港島 GMB 26 — 利園山道 鳳鳴大廈外", region: "HKI", route: "26", stopMatch: "鳳鳴大廈" },
+];
+
+const CTB_CONFIG = [
+  { title: "Citybus 6 — 站 001136", route: "6", stop: "001136" },
+  { title: "Citybus 6 — 站 002506", route: "6", stop: "002506" },
+  { title: "Citybus 15 — 站 001136", route: "15", stop: "001136" },
+  { title: "Citybus 15 — 站 002506", route: "15", stop: "002506" },
+];
+
+/* ========== 共用function ========== */
+
+function fmtTime(t) {
+  if (!t) return "--";
+  const d = new Date(t);
+  if (isNaN(d)) return t;
+  return d.toTimeString().slice(0,5);
+}
+
+function minsLeft(t) {
+  if (!t) return null;
+  const diff = Math.round((new Date(t) - new Date()) / 60000);
+  return diff < 0 ? 0 : diff;
+}
+
+function makeCard(id, title, tagClass, tagText, sub) {
+  const div = document.createElement("div");
+  div.className = "card";
+  div.id = id;
+  div.innerHTML = `
+    <h2>${title} <span class="tag ${tagClass}">${tagText}</span></h2>
+    <div class="sub">${sub || ""}</div>
+    <div class="body loading">載入中...</div>
+    <div class="updated"></div>
+  `;
+  return div;
+}
+
+function setBody(cardId, html) {
+  const card = document.getElementById(cardId);
+  if (!card) return;
+  card.querySelector(".body").innerHTML = html;
+  card.querySelector(".body").classList.remove("loading");
+  card.querySelector(".updated").textContent = "更新於 " + new Date().toTimeString().slice(0,8);
+}
+
+function setError(cardId, msg) {
+  const card = document.getElementById(cardId);
+  if (!card) return;
+  card.querySelector(".body").innerHTML = `<div class="error">⚠️ ${msg}</div>`;
+}
+
+/* ========== MTR ========== */
+
+async function loadMTR(cfg, cardId) {
+  try {
+    const url = `https://rt.data.gov.hk/v1/transport/mtr/getSchedule.php?line=${cfg.line}&sta=${cfg.sta}&lang=TC`;
+    const res = await fetch(url);
+    const json = await res.json();
+    if (json.status === 0) {
+      setError(cardId, json.message || "暫時冇資料 / 服務調整");
+      return;
+    }
+    const key = `${cfg.line}-${cfg.sta}`;
+    const data = json.data && json.data[key];
+    if (!data) {
+      setError(cardId, "暫時冇班次資料");
+      return;
+    }
+    let html = "";
+    cfg.dirs.forEach(d => {
+      const arr = data[d.key] || [];
+      html += `<div class="dir-block"><div class="dir-title">${d.label}</div>`;
+      if (arr.length === 0) {
+        html += `<div class="eta-line">暫無班次</div>`;
+      } else {
+        arr.slice(0,3).forEach(t => {
+          const m = minsLeft(t.time);
+          html += `<div class="eta-line"><span>${fmtTime(t.time)} (${t.plat}號月台)</span><span class="eta-min">${m===0?"即將到站":m+" 分鐘"}</span></div>`;
+        });
+      }
+      html += `</div>`;
+    });
+    setBody(cardId, html);
+  } catch (e) {
+    setError(cardId, "讀取失敗");
+  }
+}
+
+/* ========== Citybus ========== */
+
+async function loadCTB(cfg, cardId) {
+  try {
+    const url = `https://rt.data.gov.hk/v2/transport/citybus/eta/CTB/${cfg.stop}/${cfg.route}`;
+    const res = await fetch(url);
+    const json = await res.json();
+    const arr = json.data || [];
+    if (arr.length === 0) {
+      setError(cardId, "暫時冇班次資料");
+      return;
+    }
+    let html = "";
+    arr.slice(0,4).forEach(t => {
+      const m = minsLeft(t.eta);
+      const dirLabel = t.dir === "I" ? "回程" : "去程";
+      html += `<div class="eta-line"><span>${dirLabel} → ${t.dest||""}</span><span class="eta-min">${m===0?"即將到站":m+" 分鐘"}</span></div>`;
+    });
+    setBody(cardId, html);
+  } catch (e) {
+    setError(cardId, "讀取失敗");
+  }
+}
+
+/* ========== GMB ========== */
+/* GMB API 需要先搵 route_id + stop_seq 先可以攞 ETA，
+   邏輯：route/{region}/{route} -> 每個方向 route_seq
+        -> route-stop/{route_id}/{route_seq} 攞哂晒個方向嘅站
+        -> stop/{stop_id} 攞站名，同 stopMatch 對比
+        -> 搵到就用 eta/route-stop/{route_id}/{stop_seq} 攞 ETA
+*/
+
+async function loadGMB(cfg, cardId) {
+  try {
+    const routeRes = await fetch(`https://data.etagmb.gov.hk/route/${cfg.region}/${cfg.route}`);
+    const routeJson = await routeRes.json();
+    const routeData = routeJson.data;
+    if (!routeData) { setError(cardId, "搵唔到路線資料"); return; }
+
+    // routeData 可能係 array（多方向）或單一 object，統一轉做 array
+    const routeList = Array.isArray(routeData) ? routeData : [routeData];
+
+    let found = null; // { route_id, route_seq, stop_id, stop_seq, stopName }
+
+    for (const r of routeList) {
+      const routeId = r.route_id;
+      const directions = r.directions || [{ route_seq: 1 }, { route_seq: 2 }];
+      for (const dirInfo of directions) {
+        const routeSeq = dirInfo.route_seq || dirInfo;
+        try {
+          const rsRes = await fetch(`https://data.etagmb.gov.hk/route-stop/${routeId}/${routeSeq}`);
+          const rsJson = await rsRes.json();
+          const stops = (rsJson.data && rsJson.data.route_stops) || rsJson.data || [];
+          for (const s of stops) {
+            const stopId = s.stop_id;
+            const stopSeq = s.stop_seq;
+            // 攞站名
+            const stopRes = await fetch(`https://data.etagmb.gov.hk/stop/${stopId}`);
+            const stopJson = await stopRes.json();
+            const nameTc = (stopJson.data && (stopJson.data.name_tc || stopJson.data.name_en)) || "";
+            if (nameTc.includes(cfg.stopMatch)) {
+              found = { route_id: routeId, route_seq: routeSeq, stop_id: stopId, stop_seq: stopSeq, stopName: nameTc };
+              break;
+            }
+          }
+        } catch (e) { /* try next direction */ }
+        if (found) break;
+      }
+      if (found) break;
+    }
+
+    if (!found) {
+      setError(cardId, `搵唔到站名含「${cfg.stopMatch}」`);
+      return;
+    }
+
+    const etaRes = await fetch(`https://data.etagmb.gov.hk/eta/route-stop/${found.route_id}/${found.stop_seq}`);
+    const etaJson = await etaRes.json();
+    const etaArr = (etaJson.data && etaJson.data[0] && etaJson.data[0].enabled && etaJson.data[0].eta) || etaJson.data || [];
+
+    let html = `<div class="sub">配對站名：${found.stopName}</div>`;
+    const list = Array.isArray(etaArr) ? etaArr : [];
+    if (list.length === 0) {
+      html += `<div class="eta-line">暫無班次</div>`;
+    } else {
+      list.slice(0,3).forEach(t => {
+        const time = t.timestamp || t.eta;
+        const m = minsLeft(time);
+        html += `<div class="eta-line"><span>${fmtTime(time)}</span><span class="eta-min">${m===0?"即將到站":m+" 分鐘"}</span></div>`;
+      });
+    }
+    setBody(cardId, html);
+  } catch (e) {
+    setError(cardId, "讀取失敗（GMB API 格式或有出入）");
+  }
+}
+
+/* ========== 初始化畫面 + 定時更新 ========== */
+
+const grid = document.getElementById("grid");
+const tasks = [];
+
+MTR_CONFIG.forEach((cfg, i) => {
+  const id = `mtr-${i}`;
+  grid.appendChild(makeCard(id, cfg.title, "mtr", "MTR", `${cfg.line} / ${cfg.sta}`));
+  tasks.push(() => loadMTR(cfg, id));
+});
+
+GMB_CONFIG.forEach((cfg, i) => {
+  const id = `gmb-${i}`;
+  grid.appendChild(makeCard(id, cfg.title, "gmb", "GMB", `${cfg.region} 路線 ${cfg.route}`));
+  tasks.push(() => loadGMB(cfg, id));
+});
+
+CTB_CONFIG.forEach((cfg, i) => {
+  const id = `ctb-${i}`;
+  grid.appendChild(makeCard(id, cfg.title, "ctb", "CTB", `路線 ${cfg.route} / 站 ${cfg.stop}`));
+  tasks.push(() => loadCTB(cfg, id));
+});
+
+function refreshAll() {
+  tasks.forEach(fn => fn());
+}
+
+refreshAll();
+setInterval(refreshAll, 30000); // 每30秒更新
+</script>
+
+</body>
+</html>
