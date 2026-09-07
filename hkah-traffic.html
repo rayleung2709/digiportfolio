@@ -82,17 +82,6 @@
     text-align: right;
     margin-top: 4px;
   }
-  .debug-box {
-    margin-top: 6px;
-    font-size: 10px;
-    color: #999;
-    white-space: pre-wrap;
-    max-height: 120px;
-    overflow-y: auto;
-    background: #fafafa;
-    padding: 4px;
-    border-radius: 6px;
-  }
 </style>
 </head>
 <body>
@@ -263,36 +252,22 @@ async function fetchGmbRouteStops(routeId, routeSeq) {
 }
 
 async function loadGMB(cfg, cardId) {
-  const debug = [];
-
-  function renderDebug(html) {
-    const card = document.getElementById(cardId);
-    if (!card) return;
-    card.querySelector(".body").innerHTML = html +
-      `<div class="debug-box">${debug.join("<br>")}</div>`;
-    card.querySelector(".body").classList.remove("loading");
-  }
-
   try {
-    debug.push(`Step1: 取得 route/${cfg.region}/${cfg.route}`);
     const routeList = await fetchGmbRoute(cfg.region, cfg.route);
     if (routeList.length === 0) {
-      renderDebug(`<div class="error">⚠️ 搵唔到路線資料</div>`);
+      setError(cardId, "搵唔到路線資料");
       return;
     }
-    debug.push(`Step1 OK: 搵到 ${routeList.length} 個route項目`);
 
     let matches = [];
 
     for (const r of routeList) {
       const routeId = r.route_id;
       const directions = r.directions || [];
-      debug.push(`route_id=${routeId}, directions數=${directions.length}`);
 
       for (const dirInfo of directions) {
         const routeSeq = dirInfo.route_seq;
         const stops = await fetchGmbRouteStops(routeId, routeSeq);
-        debug.push(`route_seq=${routeSeq} 有 ${stops.length} 個站`);
 
         stops.forEach(s => {
           if (s.name_tc && s.name_tc.includes(cfg.stopMatch)) {
@@ -309,23 +284,12 @@ async function loadGMB(cfg, cardId) {
     }
 
     if (matches.length === 0) {
-      let allNames = [];
-      for (const r of routeList) {
-        for (const dirInfo of (r.directions || [])) {
-          const stops = await fetchGmbRouteStops(r.route_id, dirInfo.route_seq);
-          allNames.push(`[route_seq=${dirInfo.route_seq}] ` + stops.map(s=>`(${s.stop_seq})${s.name_tc}`).join("、"));
-        }
-      }
-      debug.push(`站名總覽:<br>${allNames.join("<br>")}`);
-      renderDebug(`<div class="error">⚠️ 搵唔到站名含「${cfg.stopMatch}」</div>`);
+      setError(cardId, `搵唔到站名含「${cfg.stopMatch}」`);
       return;
     }
 
-    debug.push(`搵到 ${matches.length} 個match: ` + matches.map(m=>`[seq${m.stop_seq}]${m.name}`).join("、"));
-
     const occIdx = (cfg.occurrence || 1) - 1;
     const found = matches[occIdx] || matches[0];
-    debug.push(`使用第${occIdx+1}個match: stop_seq=${found.stop_seq}, name=${found.name}`);
 
     const etaUrl = `https://data.etagmb.gov.hk/eta/route-stop/${found.route_id}/${found.route_seq}/${found.stop_seq}`;
     const etaRes = await fetch(etaUrl);
@@ -341,11 +305,10 @@ async function loadGMB(cfg, cardId) {
         html += `<div class="eta-line"><span>${fmtTime(t.eta)}</span><span class="eta-min">${m===null?"--":(m===0?"即將到站":m+" 分鐘")}</span></div>`;
       });
     }
-    renderDebug(html);
+    setBody(cardId, html);
 
   } catch (e) {
-    debug.push(`Exception: ${e.message}`);
-    renderDebug(`<div class="error">⚠️ 讀取失敗</div>`);
+    setError(cardId, "讀取失敗: " + e.message);
   }
 }
 
