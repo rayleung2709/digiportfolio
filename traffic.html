@@ -355,80 +355,199 @@ async function loadCTB(){
 }
 
 /* ============================================================
-   GMB (綠色專線小巴)
-   ⚠️ GMB API 結構比較複雜，以下係best-effort寫法。
-   如果實際回應格式對唔上，請打開瀏覽器 DevTools > Console/Network
-   睇返實際 JSON structure 再微調 (呢個先係"vibe coding"精髓😄)
+   GMB (綠色專線小巴) — 強化版：自動嘗試多個可能 API 格式
    ============================================================ */
-let gmbState={};
+
+// 安全 fetch：檢查 content-type，避免 HTML 錯誤頁當 JSON parse
+async function fetchJsonSafe(url){
+  const res = await fetch(url);
+  const ct = res.headers.get('content-type') || '';
+  if(!res.ok || !ct.includes('json')){
+    throw new Error(`HTTP ${res.status} @ ${url}`);
+  }
+  return res.json();
+}
+
+// 逐個試 URL，成功即用，全部失敗先拋錯（附完整錯誤列表）
+async function tryEndpoints(urls){
+  const errors=[];
+  for(const url of urls){
+    try{
+      const json = await fetchJsonSafe(url);
+      console.log('✅ 成功:', url);
+      console.log('回應內容:', JSON.stringify(json, null, 2));
+      return {url, json};
+    }catch(e){
+      console.warn('✗ 失敗:', url, '-', e.message);
+      errors.push(`${url} → ${e.message}`);
+    }
+  }
+  throw new Error('全部 API 格式都失敗:\n' + errors.join('\n'));
+}
+
+// 深層搜尋：喺任何嵌套結構入面搵出「含有指定 key 嘅物件陣列」
+function deepFindArray(obj, key, seen = new Set()){
+  if(!obj || typeof obj !== 'object') return null;
+  if(seen.has(obj)) return null;
+  seen.add(obj);
+  if(Array.isArray(obj)){
+    if(obj.length && obj.some(it => it && typeof it === 'object' && key in it)) return obj;
+    for(const item of obj){
+      const found = deepFindArray(item, key, seen);
+      if(found) return found;
+    }
+    return null;
+  }
+  for(const k in obj){
+    const found = deepFindArray(obj[k], key, seen);
+    if(found) return found;
+  }
+  return null;
+}
+
+// 猜測物件裡面最似「名稱/目的地」嘅欄位
+function guessLabel(obj){
+  if(!obj || typeof obj !== 'object') return null;
+  const keys = Object.keys(obj);
+  const tcKey = keys.find(k => /dest.*tc|tc.*dest/i.test(k)) || keys.find(k => /name.*tc/i.test(k));
+  if(tcKey && obj[tcKey]) return obj[tcKey];
+  const enKey = keys.find(k => /dest.*en|name.*en/i.test(k));
+  if(enKey && obj[enKey]) return obj[enKey];
+  return null;
+}
+
+let gmbState = {};
+
 async function loadGMBRoutes(){
-  const region=document.getElementById('gmbRegion').value;
-  const sel=document.getElementById('gmbRoute');
-  sel.innerHTML='<option>載入中...</option>';
+  const region = document.getElementById('gmbRegion').value;
+  const sel = document.getElementById('gmbRoute');
+  sel.innerHTML = '<option>載入中...</option>';
   try{
-    const r=await fetch(`https://data.etagmb.gov.hk/route/${region}`);
-    const j=await r.json();
-    console.log('GMB routes raw:', j);
-    const routes=(j.data && j.data.routes) || j.data || [];
-    sel.innerHTML=routes.map(rt=>`<option value="${rt}">${rt}</option>`).join('');
-  }catch(e){ sel.innerHTML='<option>載入失敗</option>'; console.error(e); }
+    const {json} = await tryEndpoints([
+      `https://data.etagmb.gov.hk/route/${region}`
+    ]);
+    let routesArr = deepFindArray(json, 'route_id');
+    let codes;
+    if(routesArr){
+      codes = [...new Set(routesArr.map(r => r.route_code || r.route || r.name))].filter(Boolean);
+    } else {
+      const raw = json.data;
+      codes = Array.isArray(raw) ? raw : (raw && raw.routes) || [];
+    }
+    if(!codes.length){ sel.innerHTML = '<option>找不到路線</option>'; return; }
+    sel.innerHTML = codes.map(c => `<option value="${c}">${c}</option>`).join('');
+  }catch(e){
+    sel.innerHTML = '<option>載入失敗</option>';
+    console.error(e);
+    alert('載入路線失敗，請打開 Console (F12) 查看詳情：\n' + e.message);
+  }
 }
+
 async function loadGMBDirections(){
-  const region=document.getElementById('gmbRegion').value;
-  const route=document.getElementById('gmbRoute').value;
-  const dirSel=document.getElementById('gmbDir');
-  dirSel.innerHTML='<option>載入中...</option>';
+  const region = document.getElementById('gmbRegion').value;
+  const route = document.getElementById('gmbRoute').value;
+  const dirSel = document.getElementById('gmbDir');
+  dirSel.innerHTML = '<option>載入中...</option>';
   try{
-    const r=await fetch(`https://data.etagmb.gov.hk/route/${region}/${route}`);
-    const j=await r.json();
-    console.log('GMB route detail raw:', j);
-    const routeData=Array.isArray(j.data)? j.data[0] : j.data;
-    gmbState.routeData=routeData;
-    const dirs=routeData.directions || [];
-    dirSel.innerHTML=dirs.map((d,i)=>
-      `<option value="${i}">${d.dest_tc||d.orig_tc||('方向 '+(i+1))}</option>`
-    ).join('');
-  }catch(e){ dirSel.innerHTML='<option>載入失敗</option>'; console.error(e); }
+    const {json} = await tryEndpoints([
+      `https://data.etagmb.gov.hk/route/${region}/${route}`
+    ]);
+    const dirs = deepFindArray(json, 'route_id');
+    if(!dirs || !dirs.length){
+      dirSel.innerHTML = '<option>找不到方向資料</option>';
+      console.warn('搵唔到 route_id 陣列，完整回應見上面 log');
+      return;
+    }
+    gmbState.directions = dirs;
+    dirSel.innerHTML = dirs.map((d, i) => {
+      const label = guessLabel(d) || `方向 ${d.route_seq ?? d.direction ?? (i+1)}`;
+      return `<option value="${i}">${label} (route_id:${d.route_id})</option>`;
+    }).join('');
+  }catch(e){
+    dirSel.innerHTML = '<option>載入失敗</option>';
+    console.error(e);
+    alert('載入方向失敗：\n' + e.message);
+  }
 }
+
 async function loadGMBStops(){
-  const box=document.getElementById('gmbStopResult');
-  const dirIdx=document.getElementById('gmbDir').value;
+  const box = document.getElementById('gmbStopResult');
+  const dirIdx = Number(document.getElementById('gmbDir').value);
+  const dirObj = gmbState.directions?.[dirIdx];
+  if(!dirObj){ box.innerHTML = '<p class="muted">請先選擇方向</p>'; return; }
+
+  const routeId = dirObj.route_id;
+  const routeSeq = dirObj.route_seq ?? dirObj.direction ?? (dirIdx + 1);
+  const serviceType = dirObj.service_type ?? 1;
+  gmbState.routeId = routeId;
+  gmbState.routeSeq = routeSeq;
+  gmbState.serviceType = serviceType;
+
+  box.innerHTML = '<p class="muted"><span class="spin"></span> 載入站點中...</p>';
   try{
-    const routeData=gmbState.routeData;
-    const dirObj=(routeData.directions||[])[dirIdx];
-    const routeId=dirObj.route_id || routeData.route_id;
-    const direction=dirObj.direction || (Number(dirIdx)+1);
-    const serviceType=dirObj.service_type || 1;
-    const r=await fetch(`https://data.etagmb.gov.hk/route-stop/${routeId}/${direction}/${serviceType}`);
-    const j=await r.json();
-    console.log('GMB stops raw:', j);
-    const stops=(j.data && j.data.route_stops) || j.data || [];
-    gmbState.stops=stops; gmbState.routeId=routeId; gmbState.serviceType=serviceType;
-    box.innerHTML=stops.map(s=>
-      `<div class="stop-result" onclick="selectGMBStop(${s.stop_seq})">${s.stop_seq}. ${s.stop_name_tc||s.name_tc||('站 '+s.stop_seq)}</div>`
+    // 依次試幾種可能格式（修正：先試「無 service_type」嘅正確格式）
+    const {json} = await tryEndpoints([
+      `https://data.etagmb.gov.hk/route-stop/${routeId}/${routeSeq}`,
+      `https://data.etagmb.gov.hk/route-stop/${routeId}`,
+      `https://data.etagmb.gov.hk/route-stop/${routeId}/${routeSeq}/${serviceType}`
+    ]);
+    const stops = deepFindArray(json, 'stop_seq') || deepFindArray(json, 'stop_id');
+    if(!stops || !stops.length){
+      box.innerHTML = '<p class="muted">找不到站點資料，請查看 Console 完整回應</p>';
+      return;
+    }
+    // 嘗試攞站名，如冇就逐個 call /stop/{stop_id}
+    const withNames = await Promise.all(stops.map(async s => {
+      let name = guessLabel(s);
+      if(!name && s.stop_id){
+        try{
+          const r = await fetch(`https://data.etagmb.gov.hk/stop/${s.stop_id}`);
+          const j2 = await r.json();
+          const stopObj = deepFindArray(j2, 'stop_id')?.[0] || j2.data || j2;
+          name = guessLabel(stopObj) || s.stop_id;
+        }catch{ name = s.stop_id; }
+      }
+      return {...s, _name: name || s.stop_id || ('站 ' + s.stop_seq)};
+    }));
+    gmbState.stops = withNames;
+    box.innerHTML = withNames.map(s =>
+      `<div class="stop-result" onclick="selectGMBStop(${s.stop_seq})">${s.stop_seq}. ${s._name}</div>`
     ).join('');
-  }catch(e){ box.innerHTML=`<p class="muted">❌ ${e.message} (請打開 Console 查看實際回應再調整 code)</p>`; console.error(e); }
+  }catch(e){
+    box.innerHTML = `<p class="muted">❌ ${e.message}</p>`;
+    console.error(e);
+  }
 }
-let lastGMB=null;
+
+let lastGMB = null;
 async function selectGMBStop(stopSeq){
-  lastGMB=stopSeq;
-  const box=document.getElementById('gmbResult');
-  box.innerHTML='<p class="muted"><span class="spin"></span> 載入中...</p>';
+  lastGMB = stopSeq;
+  const box = document.getElementById('gmbResult');
+  box.innerHTML = '<p class="muted"><span class="spin"></span> 載入 ETA 中...</p>';
+  const {routeId, routeSeq, serviceType} = gmbState;
   try{
-    const {routeId, serviceType}=gmbState;
-    const r=await fetch(`https://data.etagmb.gov.hk/eta/route-stop/${routeId}/${stopSeq}/${serviceType}`);
-    const j=await r.json();
-    console.log('GMB eta raw:', j);
-    const etas=(j.data && j.data.eta) || j.data || [];
-    const list=Array.isArray(etas)? etas : [];
-    if(!list.length){ box.innerHTML='<p class="muted">暫時未有班次資料</p>'; return; }
-    box.innerHTML='<div class="eta-list">'+list.map(x=>{
-      const t=x.timestamp || x.eta;
-      const mins=t? Math.round((new Date(t)-new Date())/60000) : '-';
-      return `<div class="eta-item"><div class="eta-route">小巴</div><div class="eta-min">${mins==='-'?'-':(mins<=0?'即將到達':mins+' 分鐘')}</div></div>`;
-    }).join('')+'</div>';
-    document.getElementById('gmbUpdated').textContent='更新於 '+new Date().toLocaleTimeString();
-  }catch(e){ box.innerHTML=`<p class="muted">❌ ${e.message}</p>`; }
+    const {json} = await tryEndpoints([
+      `https://data.etagmb.gov.hk/eta/route-stop/${routeId}/${stopSeq}/${routeSeq}`,
+      `https://data.etagmb.gov.hk/eta/route-stop/${routeId}/${stopSeq}`,
+      `https://data.etagmb.gov.hk/eta/route-stop/${routeId}/${stopSeq}/${serviceType}`
+    ]);
+    const etas = deepFindArray(json, 'eta') || deepFindArray(json, 'timestamp') || deepFindArray(json, 'diff');
+    if(!etas || !etas.length){
+      box.innerHTML = '<p class="muted">暫時未有班次資料</p>';
+      return;
+    }
+    box.innerHTML = '<div class="eta-list">' + etas.map(x => {
+      const t = x.timestamp || x.eta;
+      let mins = '-';
+      if(t){ mins = Math.round((new Date(t) - new Date()) / 60000); }
+      else if(x.diff != null){ mins = Math.round(x.diff / 60); }
+      return `<div class="eta-item"><div class="eta-route">小巴 (座位 ${x.enroute_stop_seq ?? '-'})</div><div class="eta-min ${mins!=='-' && mins<=2?'soon':''}">${mins==='-'?'-':(mins<=0?'即將到達':mins+' 分鐘')}</div></div>`;
+    }).join('') + '</div>';
+    document.getElementById('gmbUpdated').textContent = '更新於 ' + new Date().toLocaleTimeString();
+  }catch(e){
+    box.innerHTML = `<p class="muted">❌ ${e.message}</p>`;
+    console.error(e);
+  }
 }
 
 /* ============ 初始化 + 還原上次選擇 ============ */
