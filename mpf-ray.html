@@ -183,9 +183,10 @@
     <div class="chart-wrap"><canvas id="totalChart"></canvas></div>
     <div class="note" id="xirrNote"></div>
     <div class="note">
-      ⓘ 2024/08 期間，4隻基金一度短暫全數轉去一隻呢個 app 冇追蹤嘅「conservative fund」再轉返嚟（5日內來回），
-      如果照原始數據畫圖，會見到市值短暫跌到接近 0 嘅失實凹陷。因為呢個轉換純粹係暫存，冇實質蝕錢，
-      已經將呢兩筆 round-trip 交易移除（視為冇轉過），令線條反映真實持倉走勢。
+      ⓘ 2024/08 期間（10/08 轉出 → 15/08 轉返入），4隻基金一度短暫全數轉去一隻呢個 app 冇追蹤嘅
+      「conservative fund」再轉返嚟。「供款記錄」同「個股」頁已經如實列出呢兩筆交易，方便同月結單對數；
+      但呢張走勢圖會自動偵測呢種「短時間內cumUnits跌到0再返彈」嘅情況，用直線內插頂替嗰5日嘅市值/成本，
+      避免出現跌到接近0嘅失實凹陷（純粹畫圖時內插顯示，唔會影響任何實際成本/損益/XIRR計算）。
     </div>
   </div>
 </div>
@@ -221,13 +222,23 @@
    內建預設交易數據（照抄你提供嘅4張表：日期, 股數, 單位價, 佣金）
    佣金負數 = 回贈；金額 = 股數*單位價 + 佣金（用嚟計成本）
 
-   ⚠ 已移除：2024/08/10（大額轉出）同 2024/08/15（轉返入）呢兩筆
-   round-trip 交易（4隻基金都有），因為呢段期間錢實際上暫存喺
-   一隻呢個 app 冇追蹤嘅「conservative fund」，如果照抄會令市值圖
-   出現失實嘅斷崖式歸零。已當佢冇發生過（視為一直held住冇轉過）。
-   2024/08/20 嗰筆負佣金（回贈/雜費）保留原封不動，冇影響市值歸零問題。
+   ⚠ 2024年8月，4隻基金都曾經有一次「轉去一隻呢個 app 冇追蹤嘅
+   conservative fund，5日後又轉返嚟」嘅round-trip轉換
+   （10/08/2024 全數轉出 → 15/08/2024 全數轉返入，用同一 NAV，
+   金額對得上，對長遠成本冇任何實質影響）。
+   已經將呢兩筆交易如實加返落交易數據，令「供款記錄」同「個股」
+   頁嘅數字完整、對得上你嘅MPF月結單；
+   但為咗唔想「走勢圖」出現失實嘅斷崖式跌到接近0再彈返上嘅凹陷，
+   已經加咗一個 buildChartValues() 嘅內插function，
+   專門偵測呢種「短時間內cumUnits跌到0再返彈」嘅情況，
+   淨係喺畫圖嗰陣將呢段用直線內插頂替；交易表/個股表本身
+   繼續顯示真實數字，唔受影響。
+   （注意：10/08、15/08 兩筆嘅實際金額我係用轉出前一刻嘅
+   cumUnits 反推嘅近似值，如果你手頭有實際月結單數字，
+   可以直接覆寫呢兩行。）
+   2024/08/20 嗰筆負佣金（回贈/雜費）保留原封不動，同round-trip無關。
    2024/03/06 嗰次 rebalance（American 由0變10854，其他三隻各扣走
-   一部分）保留原數據 —— 因為屬同日內部轉換，總市值連續，唔會造成dip。
+   一部分）保留原數據 —— 屬同日內部轉換，總市值連續，唔會造成dip。
    ======================================================== */
 const DEFAULT_RAW = {
   American: { name:"American 美國股票基金", color:"#e74c3c", rows:[
@@ -235,6 +246,7 @@ const DEFAULT_RAW = {
     ["30/03/2024",66.195,11.33,0],["30/04/2024",2.099,10.92,-22.92],
     ["30/05/2024",65.348,11.48,0],["30/06/2024",62.766,11.95,0],
     ["30/07/2024",60.709,12.35,0],["05/08/2024",1.902,12.48,-23.74],
+    ["10/08/2024",-11179.694,12.48,0],["15/08/2024",11179.694,12.48,0],
     ["20/08/2024",60.891,12.32,-3234.49],["30/08/2024",0.000,12.32,0],
     ["30/09/2024",62.137,12.07,0],["15/10/2024",59.387,12.63,0],
     ["28/10/2024",2.181,12.72,-27.74],["28/11/2024",58.180,12.89,0],
@@ -263,6 +275,7 @@ const DEFAULT_RAW = {
     ["30/03/2024",27.027,27.75,0],["30/04/2024",0.857,26.73,-22.91],
     ["30/05/2024",27.211,27.56,0],["30/06/2024",26.064,28.78,0],
     ["30/07/2024",24.818,30.22,0],["05/08/2024",0.780,30.44,-23.74],
+    ["10/08/2024",-4188.116,30.44,0],["15/08/2024",4188.116,30.44,0],
     ["20/08/2024",25.269,29.68,-3234.49],["30/08/2024",0.000,30.01,0],
     ["30/09/2024",25.633,29.26,0],["15/10/2024",24.550,30.55,0],
     ["28/10/2024",0.915,30.31,-27.73],["28/11/2024",25.646,29.24,0],
@@ -291,6 +304,7 @@ const DEFAULT_RAW = {
     ["30/03/2024",20.318,36.91,0],["30/04/2024",0.638,35.87,-22.89],
     ["30/05/2024",20.023,37.46,0],["30/06/2024",19.460,38.54,0],
     ["30/07/2024",18.954,39.57,0],["05/08/2024",0.595,39.88,-23.73],
+    ["10/08/2024",-4453.631,39.88,0],["15/08/2024",4453.631,39.88,0],
     ["20/08/2024",19.036,39.40,-3234.49],["30/08/2024",0.000,39.69,0],
     ["30/09/2024",19.406,38.65,0],["15/10/2024",18.568,40.39,0],
     ["28/10/2024",0.688,40.31,-27.74],["28/11/2024",18.573,40.38,0],
@@ -319,6 +333,7 @@ const DEFAULT_RAW = {
     ["30/03/2024",25.810,29.06,0],["30/04/2024",0.815,28.12,-22.92],
     ["30/05/2024",24.962,30.05,0],["30/06/2024",25.005,29.99,0],
     ["30/07/2024",24.667,30.41,0],["05/08/2024",0.773,30.69,-23.73],
+    ["10/08/2024",-3566.026,30.69,0],["15/08/2024",3566.026,30.69,0],
     ["20/08/2024",24.799,30.24,-3234.49],["30/08/2024",0.000,30.56,0],
     ["30/09/2024",25.251,29.70,0],["15/10/2024",23.678,31.68,0],
     ["28/10/2024",0.884,31.37,-27.73],["28/11/2024",24.325,30.83,0],
@@ -646,6 +661,45 @@ function renderTransactions(){
   `).join('');
 }
 
+/* ---------- 內插工具：偵測round-trip並畫圖時內插頂替 ----------
+   偵測「cumUnits短時間內跌到接近0再返彈」呢種round-trip轉換，
+   淨係喺畫圖用嘅市值/成本數列做直線內插頂替，唔影響表格顯示嘅
+   真實數字，亦唔影響任何實際成本/損益/XIRR計算。
+   dates 有傳入就對齊嗰條master時間軸（用喺總圖）；
+   冇傳就用hist自己嘅日期（用喺個股圖）。
+------------------------------------------------------------- */
+function buildChartValues(hist, dates){
+  const n = hist.length;
+  if(n===0) return {vals:[], costs:[]};
+  const smoothedMV = hist.map(h=>h.marketValue);
+  const smoothedCost = hist.map(h=>h.cumCost);
+  for(let i=0;i<n;i++){
+    if(Math.abs(hist[i].cumUnits) < 1e-6){
+      let prev=i-1;
+      while(prev>=0 && Math.abs(hist[prev].cumUnits)<1e-6) prev--;
+      let next=i+1;
+      while(next<n && Math.abs(hist[next].cumUnits)<1e-6) next++;
+      if(prev>=0 && next<n){
+        const gapDays = (hist[next].dateObj - hist[prev].dateObj)/(1000*3600*24);
+        if(gapDays<=10){
+          const span = hist[next].dateObj - hist[prev].dateObj;
+          const t = span>0 ? (hist[i].dateObj-hist[prev].dateObj)/span : 0;
+          smoothedMV[i]  = hist[prev].marketValue + t*(hist[next].marketValue - hist[prev].marketValue);
+          smoothedCost[i]= hist[prev].cumCost     + t*(hist[next].cumCost     - hist[prev].cumCost);
+        }
+      }
+    }
+  }
+  const targetDates = dates || hist.map(h=>h.dateObj);
+  let idx=-1; const vals=[], costs=[];
+  targetDates.forEach(d=>{
+    while(idx+1<n && hist[idx+1].dateObj<=d) idx++;
+    vals.push(idx<0?0:smoothedMV[idx]);
+    costs.push(idx<0?0:smoothedCost[idx]);
+  });
+  return {vals, costs};
+}
+
 /* ---------- 渲染：走勢圖 ---------- */
 let totalChartInst=null;
 function renderHistoryChart(){
@@ -655,17 +709,8 @@ function renderHistoryChart(){
   FUND_KEYS.forEach(k=> histories[k].forEach(h=>allDatesSet.add(h.dateObj.getTime())));
   const allDates = Array.from(allDatesSet).sort((a,b)=>a-b).map(t=>new Date(+t));
 
-  function seriesFor(hist){
-    let idx=-1; const vals=[], costs=[];
-    allDates.forEach(d=>{
-      while(idx+1<hist.length && hist[idx+1].dateObj<=d) idx++;
-      vals.push(idx<0?0:hist[idx].marketValue);
-      costs.push(idx<0?0:hist[idx].cumCost);
-    });
-    return {vals,costs};
-  }
   const perFund = {};
-  FUND_KEYS.forEach(k=> perFund[k]=seriesFor(histories[k]));
+  FUND_KEYS.forEach(k=> perFund[k]=buildChartValues(histories[k], allDates));
 
   const totalValueSeries = allDates.map((_,i)=> FUND_KEYS.reduce((s,k)=>s+perFund[k].vals[i],0));
   const totalCostSeries  = allDates.map((_,i)=> FUND_KEYS.reduce((s,k)=>s+perFund[k].costs[i],0));
@@ -719,13 +764,14 @@ function renderDetail(){
     <div class="card"><div class="label">XIRR</div><div class="value ${cls(fundXirr(hist))}">${(fundXirr(hist)*100).toFixed(2)}%</div></div>
   `;
 
+  const { vals: chartVals, costs: chartCosts } = buildChartValues(hist);
   const labels = hist.map(h=>h.date);
   if(fundChartInst) fundChartInst.destroy();
   fundChartInst = new Chart(document.getElementById('fundChart'), {
     type:'line',
     data:{ labels, datasets:[
-      { label:'市值', data:hist.map(h=>h.marketValue), borderColor:RAW[key].color, backgroundColor:RAW[key].color+'33', fill:true, tension:.2 },
-      { label:'累積成本', data:hist.map(h=>h.cumCost), borderColor:'#8b95ab', borderDash:[5,4], fill:false, pointRadius:0 }
+      { label:'市值', data:chartVals, borderColor:RAW[key].color, backgroundColor:RAW[key].color+'33', fill:true, tension:.2 },
+      { label:'累積成本', data:chartCosts, borderColor:'#8b95ab', borderDash:[5,4], fill:false, pointRadius:0 }
     ]},
     options:{
       responsive:true, maintainAspectRatio:false,
