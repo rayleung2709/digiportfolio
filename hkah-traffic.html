@@ -217,77 +217,110 @@ async function loadCTB(cfg, cardId) {
     setError(cardId, "讀取失敗");
   }
 }
-
-/* ========== GMB ========== */
-/* GMB API 需要先搵 route_id + stop_seq 先可以攞 ETA，
-   邏輯：route/{region}/{route} -> 每個方向 route_seq
-        -> route-stop/{route_id}/{route_seq} 攞哂晒個方向嘅站
-        -> stop/{stop_id} 攞站名，同 stopMatch 對比
-        -> 搵到就用 eta/route-stop/{route_id}/{stop_seq} 攞 ETA
-*/
+/* ========== GMB（除錯加強版） ========== */
 
 async function loadGMB(cfg, cardId) {
+  const debug = []; // 除錯log,顯示喺卡片底
+
+  function showDebug(html, isError) {
+    const card = document.getElementById(cardId);
+    if (!card) return;
+    card.querySelector(".body").innerHTML = html + 
+      `<div style="margin-top:6px;font-size:10px;color:#999;white-space:pre-wrap;">${debug.join("<br>")}</div>`;
+    card.querySelector(".body").classList.remove("loading");
+  }
+
   try {
-    const routeRes = await fetch(`https://data.etagmb.gov.hk/route/${cfg.region}/${cfg.route}`);
-    const routeJson = await routeRes.json();
+    debug.push(`Step1: fetch route/${cfg.region}/${cfg.route}`);
+    const routeUrl = `https://data.etagmb.gov.hk/route/${cfg.region}/${cfg.route}`;
+    const routeRes = await fetch(routeUrl);
+    debug.push(`→ HTTP ${routeRes.status}`);
+    const routeText = await routeRes.text();
+    debug.push(`→ raw(前200字): ${routeText.slice(0,200)}`);
+
+    let routeJson;
+    try { routeJson = JSON.parse(routeText); }
+    catch(e) { showDebug(`<div class="error">⚠️ Step1回應唔係JSON</div>`, true); return; }
+
     const routeData = routeJson.data;
-    if (!routeData) { setError(cardId, "搵唔到路線資料"); return; }
+    if (!routeData) { showDebug(`<div class="error">⚠️ Step1冇data field</div>`, true); return; }
 
-    // routeData 可能係 array（多方向）或單一 object，統一轉做 array
     const routeList = Array.isArray(routeData) ? routeData : [routeData];
+    debug.push(`Step1 OK: 搵到 ${routeList.length} 個route項目`);
 
-    let found = null; // { route_id, route_seq, stop_id, stop_seq, stopName }
+    let found = null;
 
     for (const r of routeList) {
       const routeId = r.route_id;
-      const directions = r.directions || [{ route_seq: 1 }, { route_seq: 2 }];
+      const directions = r.directions || [];
+      debug.push(`檢查route_id=${routeId}, directions數量=${directions.length}`);
+
       for (const dirInfo of directions) {
-        const routeSeq = dirInfo.route_seq || dirInfo;
-        try {
-          const rsRes = await fetch(`https://data.etagmb.gov.hk/route-stop/${routeId}/${routeSeq}`);
-          const rsJson = await rsRes.json();
-          const stops = (rsJson.data && rsJson.data.route_stops) || rsJson.data || [];
-          for (const s of stops) {
-            const stopId = s.stop_id;
-            const stopSeq = s.stop_seq;
-            // 攞站名
-            const stopRes = await fetch(`https://data.etagmb.gov.hk/stop/${stopId}`);
+        const routeSeq = dirInfo.route_seq;
+        const rsUrl = `https://data.etagmb.gov.hk/route-stop/${routeId}/${routeSeq}`;
+        const rsRes = await fetch(rsUrl);
+        const rsText = await rsRes.text();
+        let rsJson;
+        try { rsJson = JSON.parse(rsText); } catch(e) {
+          debug.push(`route-stop 回應唔係JSON: ${rsText.slice(0,100)}`);
+          continue;
+        }
+        const stops = Array.isArray(rsJson.data) ? rsJson.data : [];
+        debug.push(`route_seq=${routeSeq} 有 ${stops.length} 個站`);
+
+        // 平行攞哂全部站名，加快速度
+        const stopNames = await Promise.all(stops.map(async s => {
+          try {
+            const stopRes = await fetch(`https://data.etagmb.gov.hk/stop/${s.stop_id}`);
             const stopJson = await stopRes.json();
-            const nameTc = (stopJson.data && (stopJson.data.name_tc || stopJson.data.name_en)) || "";
-            if (nameTc.includes(cfg.stopMatch)) {
-              found = { route_id: routeId, route_seq: routeSeq, stop_id: stopId, stop_seq: stopSeq, stopName: nameTc };
-              break;
-            }
-          }
-        } catch (e) { /* try next direction */ }
-        if (found) break;
+            const name = (stopJson.data && (stopJson.data.name_tc || stopJson.data.name_en)) || "";
+            return { ...s, name };
+          } catch(e) { return { ...s, name: "" }; }
+        }));
+
+        // debug: 列出所有站名,等我對比實際字眼
+        debug.push(`站名列表: ${stopNames.map(x=>x.name).join("、")}`);
+
+        const match = stopNames.find(x => x.name.includes(cfg.stopMatch));
+        if (match) {
+          found = { route_id: routeId, route_seq: routeSeq, stop_id: match.stop_id, stop_seq: match.stop_seq, stopName: match.name };
+          break;
+        }
       }
       if (found) break;
     }
 
     if (!found) {
-      setError(cardId, `搵唔到站名含「${cfg.stopMatch}」`);
+      showDebug(`<div class="error">⚠️ 搵唔到站名含「${cfg.stopMatch}」，請睇下面站名列表岀邊個先岩</div>`, true);
       return;
     }
 
-    const etaRes = await fetch(`https://data.etagmb.gov.hk/eta/route-stop/${found.route_id}/${found.stop_seq}`);
-    const etaJson = await etaRes.json();
-    const etaArr = (etaJson.data && etaJson.data[0] && etaJson.data[0].enabled && etaJson.data[0].eta) || etaJson.data || [];
+    debug.push(`搵到站: ${found.stopName} (stop_seq=${found.stop_seq})`);
 
+    const etaUrl = `https://data.etagmb.gov.hk/eta/route-stop/${found.route_id}/${found.stop_seq}`;
+    const etaRes = await fetch(etaUrl);
+    const etaText = await etaRes.text();
+    debug.push(`ETA raw(前200字): ${etaText.slice(0,200)}`);
+
+    let etaJson;
+    try { etaJson = JSON.parse(etaText); } catch(e) {
+      showDebug(`<div class="error">⚠️ ETA回應唔係JSON</div>`, true); return;
+    }
+
+    const etaArr = (etaJson.data && etaJson.data[0] && etaJson.data[0].eta) || [];
     let html = `<div class="sub">配對站名：${found.stopName}</div>`;
-    const list = Array.isArray(etaArr) ? etaArr : [];
-    if (list.length === 0) {
+    if (etaArr.length === 0) {
       html += `<div class="eta-line">暫無班次</div>`;
     } else {
-      list.slice(0,3).forEach(t => {
-        const time = t.timestamp || t.eta;
-        const m = minsLeft(time);
-        html += `<div class="eta-line"><span>${fmtTime(time)}</span><span class="eta-min">${m===0?"即將到站":m+" 分鐘"}</span></div>`;
+      etaArr.slice(0,3).forEach(t => {
+        const m = minsLeft(t.eta);
+        html += `<div class="eta-line"><span>${fmtTime(t.eta)}</span><span class="eta-min">${m===0?"即將到站":m+" 分鐘"}</span></div>`;
       });
     }
-    setBody(cardId, html);
+    showDebug(html, false);
+
   } catch (e) {
-    setError(cardId, "讀取失敗（GMB API 格式或有出入）");
+    showDebug(`<div class="error">⚠️ Exception: ${e.message}</div>`, true);
   }
 }
 
