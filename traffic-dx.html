@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<title>GMB API 診斷工具</title>
+<style>
+  body { font-family: monospace; padding: 16px; background:#111; color:#0f0; }
+  h2 { color:#fff; }
+  pre { background:#000; padding:10px; border-radius:6px; overflow-x:auto; white-space:pre-wrap; word-break:break-all; font-size:12px; }
+  button { padding:8px 14px; margin:6px 0; cursor:pointer; }
+  .section { border:1px solid #333; padding:10px; margin-bottom:16px; border-radius:8px; }
+</style>
+</head>
+<body>
+
+<h2>🔍 GMB 26 (HKI) API 診斷</h2>
+<button onclick="runDiag()">開始診斷</button>
+<div id="out"></div>
+
+<script>
+async function runDiag() {
+  const out = document.getElementById("out");
+  out.innerHTML = "";
+
+  function block(title) {
+    const div = document.createElement("div");
+    div.className = "section";
+    div.innerHTML = `<h3>${title}</h3><pre>載入中...</pre>`;
+    out.appendChild(div);
+    return div.querySelector("pre");
+  }
+
+  // Step 1: route
+  const p1 = block("Step1: GET /route/HKI/26");
+  let routeJson;
+  try {
+    const res = await fetch("https://data.etagmb.gov.hk/route/HKI/26");
+    routeJson = await res.json();
+    p1.textContent = JSON.stringify(routeJson, null, 2);
+  } catch (e) {
+    p1.textContent = "錯誤: " + e.message;
+    return;
+  }
+
+  const routeData = routeJson.data;
+  const routeList = Array.isArray(routeData) ? routeData : [routeData];
+  const route = routeList[0];
+  const routeId = route.route_id;
+
+  // Step 2: try route-stop with route_seq = 1
+  const p2 = block(`Step2: GET /route-stop/${routeId}/1`);
+  try {
+    const res = await fetch(`https://data.etagmb.gov.hk/route-stop/${routeId}/1`);
+    const json = await res.json();
+    p2.textContent = "HTTP " + res.status + "\n" + JSON.stringify(json, null, 2);
+  } catch (e) {
+    p2.textContent = "錯誤: " + e.message;
+  }
+
+  // Step 3: try route-stop with route_seq = 2 (in case route_id needs inbound)
+  const p3 = block(`Step3: GET /route-stop/${routeId}/2`);
+  try {
+    const res = await fetch(`https://data.etagmb.gov.hk/route-stop/${routeId}/2`);
+    const json = await res.json();
+    p3.textContent = "HTTP " + res.status + "\n" + JSON.stringify(json, null, 2);
+  } catch (e) {
+    p3.textContent = "錯誤: " + e.message;
+  }
+
+  // Step 4: try stop detail using first stop_id found in step2/3 (if any)
+  const p4 = block("Step4: 搵第一個 stop_id 嘗試 GET /stop/{stop_id}");
+  try {
+    let sampleStopId = null;
+    for (const j of [p2, p3]) {
+      try {
+        const parsed = JSON.parse(j.textContent.split("\n").slice(1).join("\n"));
+        const arr = Array.isArray(parsed.data) ? parsed.data : (parsed.data && parsed.data.route_stops) || [];
+        if (arr.length > 0) { sampleStopId = arr[0].stop_id; break; }
+      } catch (e) {}
+    }
+    if (!sampleStopId) {
+      p4.textContent = "Step2/3 都冇搵到任何 stop_id，跳過。";
+    } else {
+      const res = await fetch(`https://data.etagmb.gov.hk/stop/${sampleStopId}`);
+      const json = await res.json();
+      p4.textContent = `用 stop_id=${sampleStopId}\nHTTP ${res.status}\n` + JSON.stringify(json, null, 2);
+    }
+  } catch (e) {
+    p4.textContent = "錯誤: " + e.message;
+  }
+
+  // Step 5: 直接試 route/HKI (全部路線) 睇下route_code係咪真係"26"仲係其他格式
+  const p5 = block("Step5: GET /route/HKI （全部路線，睇下26個format岩唔岩）");
+  try {
+    const res = await fetch("https://data.etagmb.gov.hk/route/HKI");
+    const json = await res.json();
+    const data = json.data || [];
+    const filtered = Array.isArray(data) ? data.filter(r => String(r).includes("26") || (r.route_code && String(r.route_code)==="26")) : data;
+    p5.textContent = "HTTP " + res.status + "\n(只顯示同 26 有關/或前30個)\n" + JSON.stringify(filtered.length? filtered : data.slice(0,30), null, 2);
+  } catch (e) {
+    p5.textContent = "錯誤: " + e.message;
+  }
+}
+</script>
+
+</body>
+</html>
