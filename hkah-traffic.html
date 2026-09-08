@@ -510,14 +510,37 @@ async function loadGMB(cfg, cardId) {
     const occIdx = (cfg.occurrence || 1) - 1;
     const found = matches[occIdx] || matches[0];
 
-    const etaUrl = `https://data.etagmb.gov.hk/eta/route-stop/${found.route_id}/${found.route_seq}/${found.stop_seq}`;
-    const etaRes = await fetch(etaUrl);
-    const etaJson = await etaRes.json();
-    const etaArr = (etaJson.data && etaJson.data[0] && etaJson.data[0].eta) || [];
-    const items = etaArr.slice(0,3).map(t => ({ eta: t.eta }));
-    const subLabel = `配對站名：${found.name}（第${found.stop_seq}站）`;
+    // ✅ 加返:同時試兩種參數順序,並印出完整JSON方便debug
+    const urlsToTry = [
+      `https://data.etagmb.gov.hk/eta/route-stop/${found.route_id}/${found.route_seq}/${found.stop_seq}`,
+      `https://data.etagmb.gov.hk/eta/route-stop/${found.route_id}/${found.stop_seq}/${found.route_seq}`,
+    ];
 
+    let items = [];
+    for (const url of urlsToTry) {
+      try {
+        const etaRes = await fetch(url);
+        const etaJson = await etaRes.json();
+        console.log(`[GMB DEBUG] ${cfg.title} → ${url}`, etaJson); // 👈 打開瀏覽器Console(F12)睇實際結構
+
+        // 嘗試幾種可能嘅結構
+        let etaArr = etaJson?.data?.[0]?.eta
+          || etaJson?.data?.eta
+          || (Array.isArray(etaJson?.data) ? etaJson.data.flatMap(d => d.eta || []) : null)
+          || [];
+
+        if (etaArr.length > 0) {
+          items = etaArr.slice(0,3).map(t => ({ eta: t.eta || t.timestamp }));
+          break; // 呢個URL work,停手
+        }
+      } catch (err) {
+        console.warn(`[GMB DEBUG] 失敗: ${url}`, err.message);
+      }
+    }
+
+    const subLabel = `配對站名：${found.name}（第${found.stop_seq}站, route_seq=${found.route_seq}）`;
     setCardData(cardId, "gmb", { subLabel, items });
+
   } catch (e) {
     setCardError(cardId, "讀取失敗: " + e.message);
   }
