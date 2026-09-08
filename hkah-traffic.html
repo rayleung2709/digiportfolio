@@ -140,8 +140,13 @@ const CTB_CONFIG = [
   { title:"金鐘 - 金鐘花園，金鐘道", route:"6",  stop:"001136" },
 ];
 
+/* ---- GMB：region 係 "HKI"/"KLN"/"NT"，route 係路線編號
+   stopMatch 係站名關鍵字（用嚟喺 route-stop 清單裡面搵對應嗰個站）
+   occurrence：如果同一名稱嘅站喺路線裡面出現多次，用呢個揀第幾個（預設1）
+   direction：如果知道 route_seq 對應嘅方向係第幾個 (1或2)，可以加呢個縮窄範圍，唔加就兩邊都搵 ---- */
 const GMB_CONFIG = [
-  // 保留你原本嗰個 GMB_CONFIG 就得
+  { title:"港安醫院",   region:"HKI", route:"26", stopMatch:"港安醫院", occurrence:1 },
+  { title:"鳳鳴大廈外", region:"HKI", route:"26", stopMatch:"鳳鳴大廈", occurrence:1 },
 ];
 
 /* ========== 共用function ========== */
@@ -294,13 +299,80 @@ async function loadCtbCard(cfg, cardId){
   }catch(e){ setCardError(cardId, e.message); }
 }
 
-/* ========== GMB fetch（用你原本嗰套邏輯，只係最後改用 setCardData） ========== */
+/* ========== GMB fetch：三層 API（route → route-stop → eta），帶 cache ========== */
+
+const gmbRouteCache = {};   // key: region-route  → routeList
+const gmbStopCache = {};    // key: routeId-routeSeq → stops[]
+
+async function fetchGmbRoute(region, route){
+  const key = `${region}-${route}`;
+  if(gmbRouteCache[key]) return gmbRouteCache[key];
+  const res = await fetch(`https://data.etagmb.gov.hk/route/${region}/${route}`);
+  const json = await res.json();
+  const routeData = json.data;
+  const routeList = Array.isArray(routeData) ? routeData : (routeData ? [routeData] : []);
+  gmbRouteCache[key] = routeList;
+  return routeList;
+}
+
+async function fetchGmbRouteStops(routeId, routeSeq){
+  const key = `${routeId}-${routeSeq}`;
+  if(gmbStopCache[key]) return gmbStopCache[key];
+  const res = await fetch(`https://data.etagmb.gov.hk/route-stop/${routeId}/${routeSeq}`);
+  const json = await res.json();
+  const stops = (json.data && json.data.route_stops) ? json.data.route_stops : [];
+  gmbStopCache[key] = stops;
+  return stops;
+}
+
+// 搵到目標站之後，攞返 route_id / route_seq / stop_seq / dest 名
+async function findGmbStop(cfg){
+  const routeList = await fetchGmbRoute(cfg.region, cfg.route);
+  if(routeList.length===0) throw new Error("搵唔到路線資料");
+
+  const matches = [];
+  for(const r of routeList){
+    const routeId = r.route_id;
+    for(const dirInfo of (r.directions || [])){
+      // 如果指定咗 direction，就淨係搵嗰個方向
+      if(cfg.direction && dirInfo.route_seq !== cfg.direction) continue;
+      const stops = await fetchGmbRouteStops(routeId, dirInfo.route_seq);
+      stops.forEach(s=>{
+        if(s.name_tc && s.name_tc.includes(cfg.stopMatch)){
+          matches.push({
+            route_id: routeId,
+            route_seq: dirInfo.route_seq,
+            stop_seq: s.stop_seq,
+            name: s.name_tc,
+            dest: dirInfo.dest_tc,
+          });
+        }
+      });
+    }
+  }
+
+  if(matches.length===0) throw new Error(`搵唔到站名含「${cfg.stopMatch}」`);
+  const occIdx = (cfg.occurrence || 1) - 1;
+  return matches[occIdx] || matches[0];
+}
 
 async function loadGmbCard(cfg, cardId){
   try{
-    // ...呢度保留你原本 loadGMB() 嗰套 route/stop 配對邏輯...
-    // 最後攞到 items（絕對時間陣列）之後：
-    // setCardData(cardId, cfg.destLabel || "", items.map(i=>i.eta));
+    const found = await findGmbStop(cfg);
+    const url = `https://data.etagmb.gov.hk/eta/route-stop/${found.route_id}/${found.route_seq}/${found.stop_seq}`;
+    const res = await fetch(url);
+    const json = await res.json();
+
+    // GMB ETA 回應結構有機會係 data.eta 或者 data[0].eta，做多重fallback
+    let etaArr = json?.data?.eta
+      || json?.data?.[0]?.eta
+      || (Array.isArray(json?.data) ? json.data.flatMap(d => d.eta || []) : [])
+      || [];
+
+    if(etaArr.length===0){ setCardError(cardId, "暫無班次"); return; }
+
+    const absTimes = etaArr.slice(0,3).map(t => t.eta || t.timestamp);
+    setCardData(cardId, cfg.destLabel || found.dest || found.name, absTimes);
   }catch(e){ setCardError(cardId, e.message); }
 }
 
