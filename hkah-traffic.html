@@ -302,10 +302,10 @@ async function loadCtbCard(cfg, cardId){
   }catch(e){ setCardError(cardId, e.message); }
 }
 
-/* ========== GMB fetch：三層 API，帶cache + 雙URL fallback + debug log ========== */
+/* ========== GMB fetch：三層 API（route → route-stop → eta），帶 cache ========== */
 
-const gmbRouteCache = {};
-const gmbStopCache = {};
+const gmbRouteCache = {};   // key: region-route  → routeList
+const gmbStopCache = {};    // key: routeId-routeSeq → stops[]
 
 async function fetchGmbRoute(region, route){
   const key = `${region}-${route}`;
@@ -328,78 +328,54 @@ async function fetchGmbRouteStops(routeId, routeSeq){
   return stops;
 }
 
-async function loadGmbCard(cfg, cardId){
-  try{
-    const routeList = await fetchGmbRoute(cfg.region, cfg.route);
-    if(routeList.length===0){ setCardError(cardId, "搵唔到路線資料"); return; }
+// 搵到目標站之後，攞返 route_id / route_seq / stop_seq / dest 名
+async function findGmbStop(cfg){
+  const routeList = await fetchGmbRoute(cfg.region, cfg.route);
+  if(routeList.length===0) throw new Error("搵唔到路線資料");
 
-    // 搵晒所有方向、所有站，撞名嘅全部記錄落嚟
-    let matches = [];
-    for(const r of routeList){
-      const routeId = r.route_id;
-      for(const dirInfo of (r.directions || [])){
-        const routeSeq = dirInfo.route_seq;
-        const stops = await fetchGmbRouteStops(routeId, routeSeq);
-        stops.forEach(s=>{
-          if(s.name_tc && s.name_tc.includes(cfg.stopMatch)){
-            matches.push({
-              route_id: routeId,
-              route_seq: routeSeq,
-              stop_id: s.stop_id,
-              stop_seq: s.stop_seq,
-              name: s.name_tc,
-              dest: dirInfo.dest_tc,
-            });
-          }
-        });
-      }
-    }
-
-    if(matches.length===0){ setCardError(cardId, `搵唔到站名含「${cfg.stopMatch}」`); return; }
-
-    const occIdx = (cfg.occurrence || 1) - 1;
-    const found = matches[occIdx] || matches[0];
-
-    // 同時試兩種參數順序（route_seq/stop_seq 掉轉），兼容API實際行為
-    const urlsToTry = [
-      `https://data.etagmb.gov.hk/eta/route-stop/${found.route_id}/${found.route_seq}/${found.stop_seq}`,
-      `https://data.etagmb.gov.hk/eta/route-stop/${found.route_id}/${found.stop_seq}/${found.route_seq}`,
-    ];
-
-    let absTimes = [];
-    for(const url of urlsToTry){
-      try{
-        const etaRes = await fetch(url);
-        const etaJson = await etaRes.json();
-        console.log(`[GMB DEBUG] ${cfg.title} → ${url}`, etaJson); // F12睇實際結構
-
-        let etaArr = etaJson?.data?.[0]?.eta
-          || etaJson?.data?.eta
-          || (Array.isArray(etaJson?.data) ? etaJson.data.flatMap(d => d.eta || []) : null)
-          || [];
-
-        if(etaArr.length > 0){
-          absTimes = etaArr.slice(0,3).map(t => t.eta || t.timestamp);
-          break; // 呢個URL work，停手
+  const matches = [];
+  for(const r of routeList){
+    const routeId = r.route_id;
+    for(const dirInfo of (r.directions || [])){
+      if(cfg.direction && dirInfo.route_seq !== cfg.direction) continue;
+      const stops = await fetchGmbRouteStops(routeId, dirInfo.route_seq);
+      stops.forEach(s=>{
+        if(s.name_tc && s.name_tc.includes(cfg.stopMatch)){
+          matches.push({
+            route_id: routeId,
+            route_seq: dirInfo.route_seq,
+            stop_seq: s.stop_seq,
+            name: s.name_tc,
+            dest: dirInfo.dest_tc,
+          });
         }
-      }catch(err){
-        console.warn(`[GMB DEBUG] 失敗: ${url}`, err.message);
-      }
+      });
     }
-
-    if(absTimes.length===0){ setCardError(cardId, "暫無班次"); return; }
-
-    setCardData(cardId, cfg.destLabel || found.dest || found.name, absTimes);
-
-  }catch(e){
-    setCardError(cardId, "讀取失敗: " + e.message);
   }
+
+  if(matches.length===0) throw new Error(`搵唔到站名含「${cfg.stopMatch}」`);
+  const occIdx = (cfg.occurrence || 1) - 1;
+  return matches[occIdx] || matches[0];
 }
 
-const GMB_CONFIG = [
-  { title:"港安醫院",   region:"HKI", route:"26", stopMatch:"港安醫院", occurrence:1 },
-  { title:"鳳鳴大廈外", region:"HKI", route:"26", stopMatch:"鳳鳴大廈", occurrence:1 },
-];
+async function loadGmbCard(cfg, cardId){
+  try{
+    const found = await findGmbStop(cfg);
+    const url = `https://data.etagmb.gov.hk/eta/route-stop/${found.route_id}/${found.route_seq}/${found.stop_seq}`;
+    const res = await fetch(url);
+    const json = await res.json();
+
+    let etaArr = json?.data?.eta
+      || json?.data?.[0]?.eta
+      || (Array.isArray(json?.data) ? json.data.flatMap(d => d.eta || []) : [])
+      || [];
+
+    if(etaArr.length===0){ setCardError(cardId, "暫無班次"); return; }
+
+    const absTimes = etaArr.slice(0,3).map(t => t.eta || t.timestamp);
+    setCardData(cardId, cfg.destLabel || found.dest || found.name, absTimes);
+  }catch(e){ setCardError(cardId, e.message); }
+}
 
 /* ========== 初始化畫面 ========== */
 
