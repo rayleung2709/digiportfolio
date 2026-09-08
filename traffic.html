@@ -627,12 +627,11 @@ async function selectGMBStop(stopSeq){
   lastGMB = stopSeq;
   const box = document.getElementById('gmbResult');
   box.innerHTML = '<p class="muted"><span class="spin"></span> 載入 ETA 中...</p>';
-  const {routeId, routeSeq, serviceType} = gmbState;
+  const {routeId, routeSeq} = gmbState;
   try{
     const {json} = await tryEndpoints([
-      `https://data.etagmb.gov.hk/eta/route-stop/${routeId}/${stopSeq}/${routeSeq}`,
-      `https://data.etagmb.gov.hk/eta/route-stop/${routeId}/${stopSeq}`,
-      `https://data.etagmb.gov.hk/eta/route-stop/${routeId}/${stopSeq}/${serviceType}`
+      `https://data.etagmb.gov.hk/eta/route-stop/${routeId}/${routeSeq}/${stopSeq}`, // ✅ 正確順序放第一
+      `https://data.etagmb.gov.hk/eta/route-stop/${routeId}/${stopSeq}/${routeSeq}`, // 備用(舊/錯誤順序)
     ]);
     const etas = deepFindArray(json, 'eta') || deepFindArray(json, 'timestamp') || deepFindArray(json, 'diff');
     if(!etas || !etas.length){
@@ -644,7 +643,7 @@ async function selectGMBStop(stopSeq){
       let mins = '-';
       if(t){ mins = Math.round((new Date(t) - new Date()) / 60000); }
       else if(x.diff != null){ mins = Math.round(x.diff / 60); }
-      return `<div class="eta-item"><div class="eta-route">小巴 (座位 ${x.enroute_stop_seq ?? '-'})</div><div class="eta-min ${mins!=='-' && mins<=2?'soon':''}">${mins==='-'?'-':(mins<=0?'即將到達':mins+' 分鐘')}</div></div>`;
+      return `<div class="eta-item"><div class="eta-route">小巴</div><div class="eta-min ${mins!=='-' && mins<=2?'soon':''}">${mins==='-'?'-':(mins<=0?'即將到達':mins+' 分鐘')}</div></div>`;
     }).join('') + '</div>';
     document.getElementById('gmbUpdated').textContent = '更新於 ' + new Date().toLocaleTimeString();
   }catch(e){
