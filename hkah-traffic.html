@@ -52,7 +52,7 @@
     min-height:190px;
   }
 
-  .card-top{ display:flex; justify-content:space-between; align-items:flex-start; }
+  .card-top{ display:flex; justify-content:flex-start; align-items:flex-start; }
   .route-badge{
     width:42px; height:42px; border-radius:50%;
     display:flex; align-items:center; justify-content:center;
@@ -60,12 +60,6 @@
     background:#F4C40F; /* 巴士：黃色 */
   }
   .route-badge.gmb{ background:#3aa757; color:#fff; } /* 專線小巴：綠色 */
-  .pin-badge{
-    width:34px; height:34px; border-radius:50%;
-    background:rgba(255,255,255,.08);
-    display:flex; align-items:center; justify-content:center;
-    font-size:15px; color:#ccc;
-  }
 
   .stop-name{ font-size:21px; font-weight:800; margin-top:10px; line-height:1.25; }
   .direction{ font-size:15px; color:#b8bcc4; margin-top:2px; }
@@ -176,7 +170,6 @@ function makeBusCard(id, title, badgeText, badgeClass, dataType){
   div.innerHTML=`
     <div class="card-top">
       <div class="route-badge ${badgeClass}">${badgeText}</div>
-      <div class="pin-badge">📌</div>
     </div>
     <div class="stop-name">${title}</div>
     <div class="direction body-direction">載入中…</div>
@@ -203,7 +196,6 @@ function makeMtrCard(id, cfg){
     <div class="mtr-content">
       <div class="card-top">
         <div class="stop-name">${cfg.title}</div>
-        <div class="pin-badge">📌</div>
       </div>
       <div class="line-pill" style="background:${color}">${LINE_NAMES[cfg.line]||cfg.line}</div>
       <div class="direction body-direction">載入中…</div>
@@ -221,12 +213,18 @@ function makeMtrCard(id, cfg){
 const state = {};
 
 function setCardData(cardId, direction, etaAbsArr){
-  state[cardId] = { direction, etaAbs: etaAbsArr, error:null };
+  state[cardId] = {
+    direction,
+    etaAbs: etaAbsArr,
+    error:null,
+    lastUpdate: new Date()   // 只有真正攞到新資料先更新
+  };
   renderCard(cardId);
 }
 function setCardError(cardId, msg){
   if(!state[cardId]) state[cardId] = { direction:"", etaAbs:[] };
   state[cardId].error = msg;
+  state[cardId].lastUpdate = new Date();  // 出錯亦當作一次「更新嘗試」
   renderCard(cardId);
 }
 
@@ -240,21 +238,26 @@ function renderCard(cardId){
   const tsEl  = card.querySelector(".body-timestamp");
   const bigEl = card.querySelector(".body-bigcountdown");
 
+  const tsText = s.lastUpdate ? s.lastUpdate.toTimeString().slice(0,8) : "";
+
   if(s.error && (!s.etaAbs || s.etaAbs.length===0)){
     dirEl.textContent = "";
     etaEl.innerHTML = `<span class="error-text">⚠️ ${s.error}</span>`;
     bigEl.textContent = "--:--";
-    tsEl.textContent = "";
+    tsEl.textContent = tsText;
     return;
   }
 
   const secsArr = s.etaAbs.map(secsLeft);
   dirEl.textContent = "往 " + s.direction;
-  etaEl.textContent = secsArr.map(sec=>{
+
+  // 跳過第一班（已經係右下大字顯示），淨係顯示第二、第三班
+  etaEl.textContent = secsArr.slice(1).map(sec=>{
     if(sec===null) return "--";
     return Math.max(0, Math.round(sec/60)) + "分";
   }).join(" / ");
-  tsEl.textContent = new Date().toTimeString().slice(0,8);
+
+  tsEl.textContent = tsText;
   bigEl.textContent = bigCountdownText(secsArr[0]);
   bigEl.classList.toggle("soon", secsArr[0]!==null && secsArr[0]<=60);
 }
@@ -334,7 +337,6 @@ async function findGmbStop(cfg){
   for(const r of routeList){
     const routeId = r.route_id;
     for(const dirInfo of (r.directions || [])){
-      // 如果指定咗 direction，就淨係搵嗰個方向
       if(cfg.direction && dirInfo.route_seq !== cfg.direction) continue;
       const stops = await fetchGmbRouteStops(routeId, dirInfo.route_seq);
       stops.forEach(s=>{
@@ -363,7 +365,6 @@ async function loadGmbCard(cfg, cardId){
     const res = await fetch(url);
     const json = await res.json();
 
-    // GMB ETA 回應結構有機會係 data.eta 或者 data[0].eta，做多重fallback
     let etaArr = json?.data?.eta
       || json?.data?.[0]?.eta
       || (Array.isArray(json?.data) ? json.data.flatMap(d => d.eta || []) : [])
