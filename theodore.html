@@ -444,7 +444,7 @@ async function main(){
     $('#kpis').innerHTML=[
       ['帳面結餘 HKD',fmt(balance,0)],
       ['累計外部注資 HKD',fmt(contributed,0)],
-      ['累計分派收益 HKD',fmt(distributed,0)+(contributed?` <small>(${(distributed/balance*100).toFixed(1)}% of 結餘)</small>`:'')],
+      ['累計分派收益 HKD',fmt(distributed,0)+(contributed?` <small>(結餘之${(distributed/balance*100).toFixed(1)}%)</small>`:'')],
       ['最新年化分派率',`<span class="${cls(latestRate)}">${pct(latestRate)}</span>`],
       ['平均年化分派率',pct(avgRate)],
       ['年化 XIRR（連注資時序）',`<span class="${cls(irr)}">${pct(irr)}</span>`],
