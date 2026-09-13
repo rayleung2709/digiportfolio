@@ -258,10 +258,10 @@ function balanceAt(history,dateStr){
 
 async function main(){
   let data;
-  try{ data=await get('data/transactions.json'); }
+  try{ data=await get('data/transactions-theo.json'); }
   catch(e){ showError('資料下載失敗：'+e.message); console.error(e); return; }
   if(!data||!data.fund||!Array.isArray(data.transactions)){
-    showError('transactions.json 內容不完整。');
+    showError('transactions-theo.json 內容不完整。');
     return;
   }
   const FUND=data.fund;
@@ -349,14 +349,14 @@ async function main(){
     const bar=$('#txPendingBar');
     if(pendingTx.length){
       bar.style.display='';
-      $('#pendingHint').textContent=`本機暫存 ${pendingTx.length} 筆未上傳 —— 下載後覆蓋 GitHub 嗰份 transactions.json，再撳「清空本機暫存」`;
+      $('#pendingHint').textContent=`本機暫存 ${pendingTx.length} 筆未上傳 —— 下載後覆蓋 GitHub 嗰份 transactions-theo.json，再撳「清空本機暫存」`;
     }else bar.style.display='none';
     const txNavBtn=document.querySelector('nav button[data-t="tx"]');
     if(txNavBtn)txNavBtn.textContent='交易紀錄'+(pendingTx.length?` (${pendingTx.length})`:'');
   }
   $('#txExportBtn').onclick=()=>{
     const merged={fund:FUND,transactions:txs.map(t=>{const r=t.slice(0,5);return r;})};
-    downloadJSON(merged,'transactions.json');
+    downloadJSON(merged,'transactions-theo.json');
   };
   $('#txClearPendingBtn').onclick=()=>{
     if(!confirm('確定要清空本機暫存嘅新增交易？（請先確認已經上傳咗去 GitHub，唔然啲交易會冇咗）'))return;
