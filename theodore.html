@@ -1,0 +1,467 @@
+<!doctype html>
+<html lang="zh-HK">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>卓喬馬仔成長基金</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" integrity="sha384-9nhczxUqK87bcKHh20fSQcTGD4qq5GhayNYSYWqwBkINBhOfQLg/P5HG5lF1urn4" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js" integrity="sha384-Cs3dgUx6+jDxxuqHvVH8Onpyj2LF1gKZurLDlhqzuJmUqVYMJ0THTWpxK5Z086Zm" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js" integrity="sha384-zPzbVRXfR492Sd5D+HydTYCxxgHAfgVO8KERbLlpeH5unsmbAEXrscGUUqLZG9BM" crossorigin="anonymous"></script>
+<style>
+:root{--g:#0a7d3b;--r:#c0392b;--bg:#f6f7f9;--card:#fff;--mute:#666;--acc:#2c5fd1}
+*{box-sizing:border-box}
+body{margin:0;font-family:-apple-system,system-ui,sans-serif;background:var(--bg);color:#222;font-size:14px}
+header{padding:16px;background:var(--card);border-bottom:1px solid #e3e3e3}
+h1{margin:0 0 4px;font-size:18px}h1 small{display:block;font-size:11px;color:var(--mute);font-weight:400}
+.sub{color:var(--mute);font-size:12px}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+.loading{animation:pulse 1.2s ease-in-out infinite}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;padding:12px 16px}
+.kpi{background:var(--card);border-radius:10px;padding:10px 12px;border:1px solid #eee}
+.kpi .l{font-size:11px;color:var(--mute)}.kpi .v{font-size:16px;font-weight:600;margin-top:2px}
+.kpi .v small{font-size:11px;color:var(--mute);font-weight:400}
+.pos{color:var(--g)}.neg{color:var(--r)}
+nav{display:flex;gap:6px;padding:0 16px}
+nav button{flex:1;padding:12px;min-height:40px;border:0;border-radius:8px 8px 0 0;background:#e6e8ec;font-size:14px}
+nav button.on{background:var(--card);font-weight:600}
+section{display:none;background:var(--card);margin:0 16px 16px;padding:12px;border-radius:0 0 10px 10px}
+section.on{display:block}
+.wrap{overflow-x:auto}
+table{border-collapse:collapse;width:100%;white-space:nowrap}
+th,td{padding:6px 8px;text-align:right;border-bottom:1px solid #eee}
+th:first-child,td:first-child,.l{text-align:left}
+th{font-size:11px;color:var(--mute);font-weight:500;position:sticky;top:0;background:var(--card)}
+tfoot td{font-weight:600}
+canvas{max-height:280px;margin-bottom:12px}
+.bar{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:8px}
+.bar button{padding:7px 12px;min-height:32px;border:1px solid #ccc;border-radius:6px;background:#fff;font-size:12px}
+.bar button.on{background:#222;color:#fff;border-color:#222}
+.bar select,.bar input[type=date]{padding:5px 8px;font-size:13px;border-radius:6px;max-width:100%;border:1px solid #ccc}
+.hint{font-size:11px;color:var(--mute);margin-left:auto}
+.errbar{display:inline-flex;align-items:center;gap:8px;color:var(--r)}
+.errbar button{padding:4px 10px;border-radius:6px;border:1px solid var(--r);background:#fff;color:var(--r);cursor:pointer}
+.subhead{margin:16px 4px 6px;font-size:12px;font-weight:600;color:var(--mute)}
+.addform{display:none;flex-wrap:wrap;gap:8px;align-items:flex-end;margin:10px 0;padding:10px;border:1px dashed #aaa;border-radius:8px}
+.addform.on{display:flex}
+.addform label{display:flex;flex-direction:column;gap:3px;font-size:11px;color:var(--mute)}
+.addform input,.addform select{padding:6px 8px;font-size:13px;border-radius:6px;border:1px solid #ccc;min-width:120px}
+.addform button{padding:7px 14px;min-height:34px;border-radius:6px;border:1px solid #222;background:#222;color:#fff;font-size:13px;cursor:pointer}
+.addform button#fCancel{background:#fff;color:#222}
+#fErr{color:var(--r);flex-basis:100%}
+tr.pending td{background:#fff6dc}
+.rowdel{border:0;background:none;color:var(--r);font-weight:700;cursor:pointer;font-size:16px;padding:0 6px;line-height:1}
+.stagetbl tr.cur td{background:#e7f2ff;font-weight:600}
+.badge{display:inline-block;padding:2px 8px;border-radius:12px;background:var(--acc);color:#fff;font-size:11px}
+@media (prefers-color-scheme:dark){
+  :root{--bg:#111315;--card:#1b1d20;--mute:#9aa0a6}
+  body{color:#e8e8e8}
+  header{border-color:#2a2d30}
+  th,td{border-color:#2a2d30}
+  .kpi{border-color:#2a2d30}
+  nav button{background:#24262a}
+  .bar button{background:#1b1d20;border-color:#3a3d42;color:#e8e8e8}
+  .bar select,.bar input[type=date]{background:#1b1d20;color:#e8e8e8;border:1px solid #3a3d42}
+  tr.pending td{background:#3a3320}
+  .addform{border-color:#555}
+  .addform button#fCancel{background:#1b1d20;color:#e8e8e8;border-color:#3a3d42}
+  .addform input,.addform select{background:#1b1d20;color:#e8e8e8;border-color:#3a3d42}
+  .stagetbl tr.cur td{background:#16324f}
+}
+</style>
+</head>
+<body>
+<header>
+  <h1 id="title">卓喬馬仔成長基金<small id="titleEn">Theodore the Pony Growth Fund</small></h1>
+  <div class="sub loading" id="upd">載入中…</div>
+</header>
+<div class="kpis" id="kpis"></div>
+<nav role="tablist">
+  <button data-t="dash" class="on" role="tab" aria-selected="true">儀表板</button>
+  <button data-t="tx" role="tab" aria-selected="false">交易紀錄</button>
+</nav>
+
+<section id="dash" class="on" role="tabpanel" aria-hidden="false">
+  <div class="bar" id="histBar"><span class="hint">滾輪／兩指縮放，拖曳平移</span></div>
+  <canvas id="chart"></canvas>
+  <canvas id="rateChart"></canvas>
+  <div class="subhead">第五條　贖回及決策安排（自動 highlight 現行階段）</div>
+  <div class="wrap">
+    <table class="stagetbl" id="stageT"></table>
+  </div>
+  <div class="subhead">結餘歷史</div>
+  <div class="wrap" id="histT"></div>
+</section>
+
+<section id="tx" role="tabpanel" aria-hidden="true">
+  <div class="bar" id="txPendingBar" style="display:none">
+    <span class="hint" id="pendingHint"></span>
+    <button id="txExportBtn">⬇ 下載 Json</button>
+    <button id="txClearPendingBtn">🗑 清空本機暫存</button>
+  </div>
+  <div class="bar">
+    <button id="txAddToggle">+ 新增交易</button>
+    <span class="hint">新增紀錄後，只暫存於本裝置，務須下載 JSON 去覆蓋 GitHub 之版本。</span>
+  </div>
+  <form id="txAddForm" class="addform">
+    <label>日期<input type="date" id="fDate" required></label>
+    <label>類型<select id="fType">
+      <option value="Contribution">供款／贈與注資</option>
+      <option value="Distribution">現金分派</option>
+      <option value="Redemption">贖回</option>
+    </select></label>
+    <label style="min-width:200px">說明<input type="text" id="fDesc" placeholder="例如：親友賀禮 — XXX" required></label>
+    <label>金額（HKD）<input type="number" id="fAmt" step="any" min="0" required></label>
+    <label id="fRateWrap">年化分派率（%）<input type="number" id="fRate" step="any"></label>
+    <button type="submit">新增</button>
+    <button type="button" id="fCancel">取消</button>
+    <span id="fErr"></span>
+  </form>
+  <div class="bar" id="txBar">
+    <select id="txType"><option value="">全部類型</option></select>
+    <input type="date" id="txFrom" title="開始日期">
+    <input type="date" id="txTo" title="結束日期">
+    <button id="txReset">清除篩選</button>
+    <span class="hint" id="txCount"></span>
+  </div>
+  <div class="wrap" id="txT"></div>
+</section>
+
+<script>
+'use strict';
+const $=s=>document.querySelector(s);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmt=(n,d=2)=>(n==null||!isFinite(n))?'–':n.toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});
+const pct=n=>n==null||!isFinite(n)?'–':(n).toFixed(2)+'%';
+const cls=n=>n>0?'pos':n<0?'neg':'';
+const get=u=>fetch(u+'?t='+Date.now()).then(r=>{
+  if(!r.ok)throw new Error(`無法載入 ${u}（HTTP ${r.status}）`);
+  return r.json();
+});
+const charts={};
+const DAY_MS=86400000, YEAR_MS=31557600000;
+const TYPE_LABEL={Contribution:'供款／贈與注資',Distribution:'現金分派',Redemption:'贖回'};
+
+function showError(msg){
+  const box=$('#upd');
+  box.classList.remove('loading');
+  box.innerHTML=`<span class="errbar">⚠️ ${esc(msg)} <button id="retryBtn">重試</button></span>`;
+  const b=$('#retryBtn');if(b)b.onclick=()=>location.reload();
+}
+
+// ── 本機暫存交易 ──
+const LS_TX='dp_pony_pendingTx';
+const loadPendingTx=()=>{try{return JSON.parse(localStorage.getItem(LS_TX)||'[]');}catch{return[];}};
+const savePendingTx=a=>localStorage.setItem(LS_TX,JSON.stringify(a));
+function downloadJSON(obj,filename){
+  const blob=new Blob([JSON.stringify(obj,null,2)],{type:'application/json'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url;a.download=filename;document.body.appendChild(a);a.click();a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function showTab(id){
+  document.querySelectorAll('nav button').forEach(b=>{
+    const on=b.dataset.t===id;
+    b.classList.toggle('on',on);
+    b.setAttribute('aria-selected',on);
+  });
+  document.querySelectorAll('section').forEach(s=>{
+    const on=s.id===id;
+    s.classList.toggle('on',on);
+    s.setAttribute('aria-hidden',on?'false':'true');
+  });
+  setTimeout(()=>Object.values(charts).forEach(c=>c?.resize()),0);
+}
+document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>showTab(b.dataset.t));
+
+// ── Chart 共用設定 ──
+const ZOOM={zoom:{wheel:{enabled:true},pinch:{enabled:true},mode:'x'},pan:{enabled:true,mode:'x'},limits:{x:{minRange:5}}};
+const base=()=>({animation:false,interaction:{mode:'index',intersect:false},
+  plugins:{zoom:JSON.parse(JSON.stringify(ZOOM)),legend:{position:'bottom'}},
+  scales:{x:{ticks:{maxTicksLimit:8}},y:{ticks:{callback:v=>(v/1000).toFixed(0)+'k'}}}});
+const RANGES={'3M':91,'6M':182,'1Y':365,'ALL':null};
+function sliceR(rows,r){
+  if(!rows.length||r==='ALL')return rows;
+  const end=new Date(rows[rows.length-1].d);
+  const from=new Date(end-RANGES[r]*DAY_MS).toISOString().slice(0,10);
+  return rows.filter(x=>x.d>=from);
+}
+function mkBar(el,active,onRange,onReset){
+  el.querySelectorAll('button').forEach(b=>b.remove());
+  const btns=[];
+  for(const k of Object.keys(RANGES)){
+    const b=document.createElement('button');
+    b.textContent=k;
+    const on=k===active;
+    if(on)b.className='on';
+    b.setAttribute('aria-pressed',on);
+    b.onclick=()=>{
+      btns.forEach(x=>{x.classList.remove('on');x.setAttribute('aria-pressed','false');});
+      b.classList.add('on');b.setAttribute('aria-pressed','true');
+      onRange(k);
+    };
+    btns.push(b);
+  }
+  const r=document.createElement('button');
+  r.textContent='↺';r.title='重設縮放';r.setAttribute('aria-label','重設縮放');
+  r.onclick=onReset;btns.push(r);
+  el.prepend(...btns);
+}
+
+// ── XIRR ──
+function xirr(flows){
+  if(flows.length<2)return null;
+  const t0=new Date(flows[0].d),yr=f=>(new Date(f.d)-t0)/YEAR_MS;
+  let r=0.1;
+  for(let i=0;i<200;i++){
+    let f=0,df=0;
+    for(const c of flows){const t=yr(c),b=Math.pow(1+r,t);f+=c.v/b;df-=t*c.v/(b*(1+r));}
+    if(Math.abs(df)<1e-12)return null;
+    const nr=r-f/df;
+    if(!isFinite(nr)||nr<-0.99)return null;
+    if(Math.abs(nr-r)<1e-8)return nr*100;
+    r=nr;
+  }
+  return null;
+}
+
+// ── 年齡 / 階段 ──
+function ageParts(dob,now=new Date()){
+  let y=now.getFullYear()-dob.getFullYear();
+  let m=now.getMonth()-dob.getMonth();
+  let d=now.getDate()-dob.getDate();
+  if(d<0)m--;
+  if(m<0){y--;m+=12;}
+  return {y,m};
+}
+const STAGES=[
+  {min:0,max:6,label:'初生至 6 歲前',redeem:'不可贖回',ang:'強制供款',div:'強制供款'},
+  {min:6,max:12,label:'6 歲至 12 歲前',redeem:'不可贖回',ang:'強制供款',div:'由馬仔（受益人）決定'},
+  {min:12,max:18,label:'12 歲至 18 歲前',redeem:'不可贖回',ang:'由馬仔（受益人）決定',div:'由馬仔（受益人）決定'},
+  {min:18,max:24,label:'18 歲至 24 歲前',redeem:'可贖回最多 25%',ang:'由馬仔（受益人）決定',div:'由馬仔（受益人）決定'},
+  {min:24,max:Infinity,label:'24 歲起',redeem:'可贖回全部',ang:'由馬仔（受益人）決定',div:'由馬仔（受益人）決定'}
+];
+function stageIdx(ageYears){return STAGES.findIndex(s=>ageYears>=s.min&&ageYears<s.max);}
+function nextMilestone(dob,now){
+  for(const b of [6,12,18,24]){
+    const d=new Date(dob);d.setFullYear(d.getFullYear()+b);
+    if(d>now)return {years:b,date:d,daysLeft:Math.ceil((d-now)/DAY_MS)};
+  }
+  return null;
+}
+function balanceAt(history,dateStr){
+  let ans=null;
+  for(const h of history){if(h.d<=dateStr)ans=h.balance;else break;}
+  return ans;
+}
+
+async function main(){
+  let data;
+  try{ data=await get('data/transactions.json'); }
+  catch(e){ showError('資料下載失敗：'+e.message); console.error(e); return; }
+  if(!data||!data.fund||!Array.isArray(data.transactions)){
+    showError('transactions.json 內容不完整。');
+    return;
+  }
+  const FUND=data.fund;
+  $('#title').innerHTML=`${esc(FUND.name)}<small>${esc(FUND.nameEn||'')}</small>`;
+  document.title=FUND.name;
+
+  let pendingTx=loadPendingTx();
+  const rawTxs=[...data.transactions,...pendingTx];
+  if(!rawTxs.length){ showError('暫時未有任何交易，請按「+ 新增交易」新增第一筆。'); return; }
+  const txs=[...rawTxs].sort((a,b)=>a[0]<b[0]?-1:a[0]>b[0]?1:0);
+
+  // ── 逐筆累算 ──
+  let contributed=0,distributed=0,redeemed=0;
+  const history=[];
+  const rates=[];
+  for(const t of txs){
+    const [d,type,desc,amt,rate]=t;
+    if(type==='Contribution')contributed+=amt;
+    else if(type==='Distribution'){distributed+=amt;if(rate!=null){rates.push(rate);}}
+    else if(type==='Redemption')redeemed+=amt;
+    const balance=contributed+distributed-redeemed;
+    history.push({d,contributed,distributed,redeemed,balance,rate:type==='Distribution'?rate:null});
+  }
+  const balance=contributed+distributed-redeemed;
+  const latestRate=rates.length?rates[rates.length-1]:null;
+  const avgRate=rates.length?rates.reduce((a,b)=>a+b,0)/rates.length:null;
+  const today=new Date();
+  const dob=new Date(FUND.beneficiaryDOB);
+  const {y,m}=ageParts(dob,today);
+  const ageYears=(today-dob)/(365.25*DAY_MS);
+  const sIdx=stageIdx(ageYears);
+  const stage=STAGES[sIdx];
+  const milestone=nextMilestone(dob,today);
+  const flows=txs.filter(t=>t[1]==='Contribution'||t[1]==='Redemption')
+    .map(t=>({d:t[0],v:t[1]==='Contribution'?-t[3]:t[3]}));
+  const irr=xirr([...flows,{d:today.toISOString().slice(0,10),v:balance}]);
+
+  // 可贖回上限
+  let maxRedeem={amt:0,note:'尚未達可贖回年齡（18 歲）'};
+  if(sIdx>=3&&sIdx<4){
+    const d18=new Date(dob);d18.setFullYear(d18.getFullYear()+18);
+    const bal18=balanceAt(history,d18.toISOString().slice(0,10));
+    maxRedeem= bal18!=null ? {amt:bal18*0.25,note:'18 歲當日結餘之 25% 上限'} : {amt:0,note:'尚未到 18 歲'};
+  }else if(sIdx>=4){
+    maxRedeem={amt:balance,note:'可全數贖回'};
+  }
+
+  // ── 新增交易表單 ──
+  const addForm=$('#txAddForm'),addToggle=$('#txAddToggle');
+  const fType=$('#fType'),fDesc=$('#fDesc'),fAmt=$('#fAmt'),fRate=$('#fRate'),fRateWrap=$('#fRateWrap'),fErr=$('#fErr');
+  function syncRateVisibility(){ fRateWrap.style.display=fType.value==='Distribution'?'':'none'; }
+  fType.onchange=syncRateVisibility;
+  addToggle.onclick=()=>{
+    const opening=!addForm.classList.contains('on');
+    addForm.classList.toggle('on');
+    if(opening){
+      fType.value='Contribution';syncRateVisibility();
+      $('#fDate').value=today.toISOString().slice(0,10);
+      fDesc.value='';fAmt.value='';fRate.value='';fErr.textContent='';
+    }
+  };
+  $('#fCancel').onclick=()=>{addForm.classList.remove('on');fErr.textContent='';};
+  addForm.onsubmit=e=>{
+    e.preventDefault();
+    fErr.textContent='';
+    const d=$('#fDate').value,type=fType.value,desc=fDesc.value.trim(),amt=parseFloat(fAmt.value);
+    if(!d){fErr.textContent='請選日期';return;}
+    if(!desc){fErr.textContent='請輸入說明';return;}
+    if(!isFinite(amt)||amt<=0){fErr.textContent='請輸入有效金額';return;}
+    if(type==='Redemption'&&sIdx<3){
+      if(!confirm('依章則，受益人現時階段不可贖回本金，是否仍要強行新增？'))return;
+    }
+    const row=[d,type,desc,amt];
+    if(type==='Distribution'){
+      const r=parseFloat(fRate.value);
+      if(isFinite(r))row.push(r);
+    }
+    row.push('p'+Date.now()+Math.random().toString(36).slice(2,7));
+    pendingTx=[...pendingTx,row];
+    savePendingTx(pendingTx);
+    location.reload();
+  };
+
+  function refreshPendingBar(){
+    const bar=$('#txPendingBar');
+    if(pendingTx.length){
+      bar.style.display='';
+      $('#pendingHint').textContent=`本機暫存 ${pendingTx.length} 筆未上傳 —— 下載後覆蓋 GitHub 嗰份 transactions.json，再撳「清空本機暫存」`;
+    }else bar.style.display='none';
+    const txNavBtn=document.querySelector('nav button[data-t="tx"]');
+    if(txNavBtn)txNavBtn.textContent='交易紀錄'+(pendingTx.length?` (${pendingTx.length})`:'');
+  }
+  $('#txExportBtn').onclick=()=>{
+    const merged={fund:FUND,transactions:txs.map(t=>{const r=t.slice(0,5);return r;})};
+    downloadJSON(merged,'transactions.json');
+  };
+  $('#txClearPendingBtn').onclick=()=>{
+    if(!confirm('確定要清空本機暫存嘅新增交易？（請先確認已經上傳咗去 GitHub，唔然啲交易會冇咗）'))return;
+    localStorage.removeItem(LS_TX);
+    location.reload();
+  };
+  refreshPendingBar();
+
+  // ── 交易篩選 ──
+  const txTypeSel=$('#txType'),txFromInp=$('#txFrom'),txToInp=$('#txTo'),txResetBtn=$('#txReset');
+  txTypeSel.innerHTML=`<option value="">全部類型</option>`+
+    Object.keys(TYPE_LABEL).map(t=>`<option value="${t}">${esc(TYPE_LABEL[t])}</option>`).join('');
+  txFromInp.min=txToInp.min=txs[0][0];
+  txFromInp.max=txToInp.max=txs[txs.length-1][0];
+  [txTypeSel,txFromInp,txToInp].forEach(el=>el.onchange=drawTx);
+  txResetBtn.onclick=()=>{txTypeSel.value='';txFromInp.value='';txToInp.value='';drawTx();};
+
+  function filteredTxs(){
+    const type=txTypeSel.value,from=txFromInp.value,to=txToInp.value;
+    return txs.filter(t=>{
+      if(type&&t[1]!==type)return false;
+      if(from&&t[0]<from)return false;
+      if(to&&t[0]>to)return false;
+      return true;
+    });
+  }
+  function drawTx(){
+    const list=filteredTxs();
+    $('#txCount').textContent=`共 ${list.length} / ${txs.length} 筆`;
+    $('#txT').innerHTML=list.length?`<table><thead><tr><th>日期</th><th class="l">類型</th><th class="l">說明</th><th>金額 HKD</th><th>年化率</th><th></th></tr></thead><tbody>${
+      [...list].reverse().map(row=>{
+        const [d,t,desc,amt,rate,pid]=row;
+        return `<tr class="${pid?'pending':''}"><td>${esc(d)}</td><td class="l">${esc(TYPE_LABEL[t]||t)}</td><td class="l">${esc(desc)}</td>
+          <td class="${t==='Redemption'?'neg':''}">${t==='Redemption'?'-':''}${fmt(amt,2)}</td><td>${rate!=null?pct(rate):''}</td>
+          <td>${pid?`<button class="rowdel" data-pid="${pid}" title="刪除呢筆暫存交易">×</button>`:''}</td></tr>`;
+      }).join('')
+    }</tbody></table>`:'<div class="sub">無符合條件的交易</div>';
+    $('#txT').querySelectorAll('.rowdel').forEach(b=>b.onclick=e=>{
+      e.stopPropagation();
+      const pid=b.dataset.pid;
+      pendingTx=pendingTx.filter(x=>x[x.length-1]!==pid);
+      savePendingTx(pendingTx);
+      location.reload();
+    });
+  }
+
+  // ── 階段表 ──
+  function drawStageTable(){
+    $('#stageT').innerHTML=`<thead><tr><th class="l">年齡階段</th><th class="l">本金贖回安排</th><th class="l">利是及節慶贈與</th><th class="l">基金分派收益</th></tr></thead>
+      <tbody>${STAGES.map((s,i)=>`<tr class="${i===sIdx?'cur':''}"><td class="l">${esc(s.label)}${i===sIdx?' <span class="badge">現時</span>':''}</td>
+        <td class="l">${esc(s.redeem)}</td><td class="l">${esc(s.ang)}</td><td class="l">${esc(s.div)}</td></tr>`).join('')}</tbody>`;
+  }
+
+  // ── 圖表 ──
+  let histRange='ALL';
+  function drawHistTable(D){
+    $('#histT').innerHTML=`<table><thead><tr><th>日期</th><th>累計注資</th><th>累計分派收益</th><th>累計贖回</th><th>帳面結餘</th><th>年化分派率</th></tr></thead><tbody>${
+      [...D].reverse().map(h=>`<tr><td>${esc(h.d)}</td><td>${fmt(h.contributed,0)}</td><td>${fmt(h.distributed,0)}</td><td>${h.redeemed?fmt(h.redeemed,0):'–'}</td><td>${fmt(h.balance,0)}</td><td>${h.rate!=null?pct(h.rate):''}</td></tr>`).join('')
+    }</tbody></table>`;
+  }
+  function drawHist(rg){
+    histRange=rg;
+    charts.hist?.destroy();charts.rate?.destroy();
+    const D=sliceR(history,rg);
+    drawHistTable(D);
+    const o=base();
+    charts.hist=new Chart($('#chart'),{type:'line',data:{labels:D.map(h=>h.d),datasets:[
+      {label:'累計外部注資 HKD',data:D.map(h=>h.contributed),borderColor:'#999',backgroundColor:'rgba(150,150,150,.25)',pointRadius:0,fill:'origin',stack:'s'},
+      {label:'累計分派收益 HKD',data:D.map(h=>h.distributed),borderColor:'#0a7d3b',backgroundColor:'rgba(10,125,59,.25)',pointRadius:0,fill:'-1',stack:'s'},
+      {label:'帳面結餘 HKD',data:D.map(h=>h.balance),borderColor:'#2c5fd1',borderWidth:2,pointRadius:0,fill:false}
+    ]},options:o});
+    const o2=base();o2.scales.y.ticks.callback=v=>v.toFixed(1)+'%';
+    charts.rate=new Chart($('#rateChart'),{type:'line',data:{labels:D.map(h=>h.d),datasets:[
+      {label:'年化分派率 (%)',data:D.map(h=>h.rate),spanGaps:true,borderColor:'#c0392b',pointRadius:2,tension:.2}
+    ]},options:o2});
+  }
+  mkBar($('#histBar'),histRange,drawHist,()=>{charts.hist?.resetZoom();charts.rate?.resetZoom();});
+
+  function render(){
+    Object.keys(charts).forEach(k=>{charts[k]?.destroy();delete charts[k];});
+    const upd=$('#upd');
+    upd.classList.remove('loading');
+    upd.textContent=`帳戶最後更新：${txs[txs.length-1][0]} · 信託公司：${FUND.trustee} · 基金經理：${FUND.manager} · 底層資產：${FUND.underlying}`;
+
+    $('#kpis').innerHTML=[
+      ['帳面結餘 HKD',fmt(balance,0)],
+      ['累計外部注資 HKD',fmt(contributed,0)],
+      ['累計分派收益 HKD',fmt(distributed,0)+(contributed?` <small>(${(distributed/balance*100).toFixed(1)}% of 結餘)</small>`:'')],
+      ['最新年化分派率',`<span class="${cls(latestRate)}">${pct(latestRate)}</span>`],
+      ['平均年化分派率',pct(avgRate)],
+      ['年化 XIRR（連注資時序）',`<span class="${cls(irr)}">${pct(irr)}</span>`],
+      ['受益人年齡',`${y} 歲 ${m} 個月`],
+      ['現行贖回階段',esc(stage.label)],
+      ['距下個里程碑',milestone?`${milestone.years} 歲生日仲有 ${milestone.daysLeft} 日`:'已達最終階段（24 歲起）'],
+      ['依章則現時可贖回上限',`${fmt(maxRedeem.amt,0)} <small>${esc(maxRedeem.note)}</small>`],
+    ].map(([l,v])=>`<div class="kpi"><div class="l">${l}</div><div class="v">${v}</div></div>`).join('');
+
+    drawStageTable();
+    drawTx();
+    if(history.length)drawHist(histRange);
+  }
+
+  render();
+}
+main().catch(e=>{showError('未預期的錯誤：'+e.message);console.error(e);});
+</script>
+</body>
+</html>
