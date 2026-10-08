@@ -1,20 +1,20 @@
 {
- "updated": "2026-10-07T22:17:20+00:00",
+ "updated": "2026-10-08T22:30:11+00:00",
  "prices": {
-  "FX:USDHKD": 7.8476,
-  "LON:CRPU": 6.1,
-  "LON:EMCA": 6.647,
-  "LON:IAUP": 39.76,
-  "LON:IBTA": 5.952,
-  "LON:IDFF": 97.035,
-  "LON:ISEU": 43.99,
-  "LON:LQDA": 6.021,
-  "LON:NDIA": 8.133,
-  "LON:SAJP": 10.21,
-  "LON:SDIA": 6.356,
-  "LON:SPYL": 19.266,
-  "LON:VDTY": 20.468,
-  "LON:VJPA": 50.13,
-  "LON:XMME": 93.87
+  "FX:USDHKD": 7.8475,
+  "LON:CRPU": 6.101,
+  "LON:EMCA": 6.657,
+  "LON:IAUP": 39.7,
+  "LON:IBTA": 5.951,
+  "LON:IDFF": 95.355,
+  "LON:ISEU": 43.66,
+  "LON:LQDA": 6.039,
+  "LON:NDIA": 8.002,
+  "LON:SAJP": 10.132,
+  "LON:SDIA": 6.353,
+  "LON:SPYL": 19.256,
+  "LON:VDTY": 20.4825,
+  "LON:VJPA": 49.645,
+  "LON:XMME": 92.39
  }
 }
